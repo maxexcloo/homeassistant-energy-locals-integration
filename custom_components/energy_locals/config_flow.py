@@ -6,6 +6,14 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
 
+
+def _validate_date(value: str) -> str:
+    try:
+        datetime.date.fromisoformat(value)
+        return value
+    except (ValueError, TypeError):
+        raise vol.Invalid("Use YYYY-MM-DD format")
+
 from .const import (
     DOMAIN,
     CONF_USERNAME,
@@ -53,7 +61,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
                 vol.Required(CONF_ACCOUNT): str,
-                vol.Required(CONF_START_DATE, default=default_date): cv.string,
+                vol.Required(CONF_START_DATE, default=default_date): _validate_date,
                 vol.Required(CONF_PRICE_USAGE_DOLLARS, default=0.359): vol.Coerce(
                     float
                 ),

@@ -20,6 +20,7 @@ from homeassistant.components.recorder.models import StatisticData, StatisticMea
 
 from .const import (
     DOMAIN,
+    CONF_ACCOUNT,
     CONF_START_DATE,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_PRICE_SUPPLY_DOLLARS,
@@ -70,7 +71,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         for key in ["y", "value", "val", "usage", "amount"]:
             if key in point:
                 try:
-                    return float(point[key])
+                    return max(0.0, float(point[key]))
                 except (ValueError, TypeError):
                     continue
         return 0.0
@@ -105,7 +106,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
-        db_cost, last_ts_c = await self._get_db_total(id_c)
+        db_cost, _ = await self._get_db_total(id_c)
 
         g_kwh = db_kwh if db_kwh is not None else 0.0
         g_cost = db_cost if db_cost is not None else 0.0
@@ -187,7 +188,12 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             day_total_kwh = 0.0
 
             for p in usage_data:
-                dt_p = datetime.datetime.fromisoformat(p["dateValue"])
+                try:
+                    dt_p = datetime.datetime.fromisoformat(p["dateValue"])
+                except (KeyError, ValueError, TypeError):
+                    _LOGGER.debug("Skipping malformed data point: %s", p)
+                    continue
+
                 if not dt_p.tzinfo:
                     dt_p = dt_p.replace(tzinfo=TZ_SYDNEY, fold=1)
 
@@ -273,9 +279,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 st_c_all,
             )
 
-        if self._force_rebuild:
-            self._force_rebuild = False
-
         if g_kwh == 0.0:
             if db_kwh and db_kwh > 0:
                 _LOGGER.warning(
@@ -288,6 +291,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     "last_synced": dt_util.now(),
                 }
             raise UpdateFailed("No valid history found.")
+
+        if self._force_rebuild:
+            self._force_rebuild = False
 
         return {
             "total_kwh": g_kwh,
