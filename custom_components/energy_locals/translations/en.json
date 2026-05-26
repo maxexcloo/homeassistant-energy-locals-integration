@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Energy Locals",
+        "description": "Enter your MyAccount credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "account_id": "Utility Account ID",
+          "start_date": "Import Start Date (YYYY-MM-DD)",
+          "usage_price_dollars": "Price per kWh ($)",
+          "supply_price_dollars": "Daily Supply Charge ($)"
+        }
+      },
+      "init": {
+        "title": "Update Prices",
+        "data": {
+            "start_date": "Import Start Date (YYYY-MM-DD)",
+            "usage_price_dollars": "Price per kWh ($)",
+            "supply_price_dollars": "Daily Supply Charge ($)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check credentials.",
+      "invalid_auth": "Invalid authentication."
+    }
+  }
+}
