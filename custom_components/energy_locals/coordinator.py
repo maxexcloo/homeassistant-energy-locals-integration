@@ -32,6 +32,10 @@ _LOGGER = logging.getLogger(__name__)
 TZ_SYDNEY = ZoneInfo("Australia/Sydney")
 TZ_UTC = datetime.timezone.utc
 
+# Days within which we require a complete day (23:30 present) before importing.
+# Beyond this, whatever the API has is treated as final (handles genuine data gaps).
+_DATA_GRACE_DAYS = 3
+
 
 class EnergyLocalsCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, api: EnergyLocalsAPI, entry: ConfigEntry):
@@ -75,6 +79,20 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 except (ValueError, TypeError):
                     continue
         return 0.0
+
+    def _is_day_complete(self, usage_data: list) -> bool:
+        """Return True if the 23:30 interval is present, meaning the full day is published."""
+        for p in usage_data:
+            try:
+                dt = datetime.datetime.fromisoformat(p["dateValue"])
+                if not dt.tzinfo:
+                    dt = dt.replace(tzinfo=TZ_SYDNEY, fold=1)
+                dt_local = dt.astimezone(TZ_SYDNEY)
+                if dt_local.hour == 23 and dt_local.minute == 30:
+                    return True
+            except (KeyError, ValueError, TypeError):
+                continue
+        return False
 
     async def _async_update_data(self):
         if self._sync_lock.locked():
@@ -180,9 +198,25 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 except Exception:
                     pass
 
+            days_old = (today_syd - curr).days
+            within_grace = days_old <= _DATA_GRACE_DAYS
+
             if not usage_data:
+                if within_grace:
+                    # Data not yet published — stop here so we don't skip this day
+                    # and corrupt sums for all subsequent days. Retry next sync.
+                    _LOGGER.debug("No data for %s yet, stopping sync.", curr)
+                    break
+                # Beyond grace period: genuine gap, advance past it.
+                _LOGGER.debug("No data for %s (beyond %d-day grace), skipping.", curr, _DATA_GRACE_DAYS)
                 curr += timedelta(days=1)
                 continue
+
+            if within_grace and not self._is_day_complete(usage_data):
+                # Partial day — API hasn't published through 23:30 yet.
+                # Stop here to avoid writing an incomplete sum that corrupts future days.
+                _LOGGER.debug("Day %s incomplete (no 23:30 interval), stopping sync.", curr)
+                break
 
             buckets = {}
             day_total_kwh = 0.0
