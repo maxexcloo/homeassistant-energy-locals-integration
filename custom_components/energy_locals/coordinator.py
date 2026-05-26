@@ -17,7 +17,6 @@ from homeassistant.components.recorder.statistics import (
     StatisticMetaData,
 )
 from homeassistant.components.recorder.models import StatisticData, StatisticMeanType
-from homeassistant.components.sensor import SensorDeviceClass
 
 from .const import (
     DOMAIN,
@@ -253,7 +252,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     statistic_id=id_e,
                     unit_of_measurement="kWh",
                     mean_type=StatisticMeanType.NONE,
-                    unit_class=SensorDeviceClass.ENERGY,
+                    unit_class="energy",
                 ),
                 st_e_all,
             )
