@@ -119,8 +119,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         price_daily = float(conf.get(CONF_PRICE_SUPPLY_DOLLARS, 0.94))
 
         account_id = self.entry.data[CONF_ACCOUNT]
-        id_e = f"{DOMAIN}:{account_id}_usage"
-        id_c = f"{DOMAIN}:{account_id}_cost"
+        statistic_base = f"account_{account_id}"
+        id_e = f"{DOMAIN}:{statistic_base}_usage"
+        id_c = f"{DOMAIN}:{statistic_base}_cost"
 
         # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
