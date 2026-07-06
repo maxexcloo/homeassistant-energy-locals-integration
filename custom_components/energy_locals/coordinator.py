@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.util import dt as dt_util
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import (
-    async_import_statistics,
+    async_add_external_statistics,
     get_last_statistics,
     StatisticMetaData,
 )
@@ -283,7 +283,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             }
 
         if st_e_all:
-            async_import_statistics(
+            async_add_external_statistics(
                 self.hass,
                 StatisticMetaData(
                     has_mean=False,
@@ -299,7 +299,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             )
 
         if st_c_all:
-            async_import_statistics(
+            async_add_external_statistics(
                 self.hass,
                 StatisticMetaData(
                     has_mean=False,
