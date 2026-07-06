@@ -85,14 +85,18 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
+            title = f"Energy Locals ({user_input[CONF_ACCOUNT]})"
             self.hass.config_entries.async_update_entry(
-                self.config_entry, data={**self.config_entry.data, **user_input}
+                self.config_entry, title=title, data={**self.config_entry.data, **user_input}
             )
             return self.async_create_entry(title="", data={})
 
         data = self.config_entry.data
         schema = vol.Schema(
             {
+                vol.Required(
+                    CONF_ACCOUNT, default=data.get(CONF_ACCOUNT)
+                ): cv.string,
                 vol.Required(
                     CONF_START_DATE, default=data.get(CONF_START_DATE)
                 ): cv.string,
