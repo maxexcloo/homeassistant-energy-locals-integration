@@ -25,6 +25,9 @@
     "error": {
       "cannot_connect": "Failed to connect. Check credentials.",
       "invalid_auth": "Invalid authentication."
+    },
+    "abort": {
+      "already_configured": "This Energy Locals utility account is already configured."
     }
   }
 }

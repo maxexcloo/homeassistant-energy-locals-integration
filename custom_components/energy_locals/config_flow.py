@@ -14,6 +14,7 @@ def _validate_date(value: str) -> str:
     except (ValueError, TypeError):
         raise vol.Invalid("Use YYYY-MM-DD format")
 
+
 from .const import (
     DOMAIN,
     CONF_USERNAME,
@@ -34,13 +35,17 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return EnergyLocalsOptionsFlow()
+        return EnergyLocalsOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input=None):
         """Handle the initial setup."""
         errors = {}
 
         if user_input is not None:
+            for entry in self._async_current_entries():
+                if entry.data.get(CONF_ACCOUNT) == user_input[CONF_ACCOUNT]:
+                    return self.async_abort(reason="already_configured")
+
             api = EnergyLocalsAPI(
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
@@ -75,6 +80,9 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
+    def __init__(self, config_entry):
+        self.config_entry = config_entry
+
     async def async_step_init(self, user_input=None):
         if user_input is not None:
             self.hass.config_entries.async_update_entry(

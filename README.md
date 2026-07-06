@@ -16,7 +16,7 @@ Imports interval usage data from [Energy Locals Urban](https://urban.energylocal
 
 1. Open HACS in Home Assistant
 2. Go to **Integrations** → **⋮** → **Custom repositories**
-3. Add `https://github.com/maxexcloo/ha-energy-locals` with category **Integration**
+3. Add `https://github.com/maxexcloo/homeassistant-energy-locals-integration` with category **Integration**
 4. Search for **Energy Locals** and install
 5. Restart Home Assistant
 
