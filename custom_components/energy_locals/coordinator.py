@@ -13,7 +13,6 @@ from homeassistant.util import dt as dt_util
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
-    clear_statistics,
     get_last_statistics,
     StatisticMetaData,
 )
@@ -71,7 +70,20 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         _LOGGER.warning("Clearing Energy Locals statistics: %s", statistic_ids)
         recorder = get_instance(self.hass)
-        await recorder.async_add_executor_job(clear_statistics, recorder, statistic_ids)
+        done = self.hass.loop.create_future()
+
+        def _on_done():
+            self.hass.loop.call_soon_threadsafe(_set_done)
+
+        def _set_done():
+            if not done.done():
+                done.set_result(None)
+
+        recorder.async_clear_statistics(statistic_ids, on_done=_on_done)
+        try:
+            await asyncio.wait_for(done, timeout=60)
+        except TimeoutError as err:
+            raise UpdateFailed("Timed out clearing imported statistics") from err
 
     async def async_force_sync(self):
         _LOGGER.warning("Manual Sync Triggered by User")
