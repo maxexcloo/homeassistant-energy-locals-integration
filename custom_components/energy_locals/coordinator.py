@@ -72,7 +72,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         recorder = get_instance(self.hass)
         done = self.hass.loop.create_future()
 
-        def _on_done():
+        def _on_done(*_args):
             self.hass.loop.call_soon_threadsafe(_set_done)
 
         def _set_done():
@@ -81,7 +81,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         recorder.async_clear_statistics(statistic_ids, on_done=_on_done)
         try:
-            await asyncio.wait_for(done, timeout=60)
+            await asyncio.wait_for(done, timeout=600)
         except TimeoutError as err:
             raise UpdateFailed("Timed out clearing imported statistics") from err
 
