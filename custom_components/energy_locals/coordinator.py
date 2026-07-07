@@ -51,6 +51,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._force_rebuild = False
         self._sync_lock = asyncio.Lock()
+        self._statistics_clear_in_progress = False
+        self._statistics_clear_completed = False
 
     def _statistic_ids(self, account_id):
         statistic_base = f"account_{account_id}"
@@ -59,31 +61,34 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             f"{DOMAIN}:{statistic_base}_cost",
         )
 
-    async def _clear_imported_statistics(self, account_ids):
+    def _schedule_clear_imported_statistics(self, account_ids):
         statistic_ids = []
         for account_id in account_ids:
             if account_id:
                 statistic_ids.extend(self._statistic_ids(account_id))
 
         if not statistic_ids:
+            self._statistics_clear_completed = True
+            return
+
+        if self._statistics_clear_in_progress:
             return
 
         _LOGGER.warning("Clearing Energy Locals statistics: %s", statistic_ids)
         recorder = get_instance(self.hass)
-        done = self.hass.loop.create_future()
 
         def _on_done(*_args):
-            self.hass.loop.call_soon_threadsafe(_set_done)
+            self.hass.loop.call_soon_threadsafe(_clear_done)
 
-        def _set_done():
-            if not done.done():
-                done.set_result(None)
+        def _clear_done():
+            self._statistics_clear_in_progress = False
+            self._statistics_clear_completed = True
+            self._force_rebuild = True
+            self.hass.async_create_task(self.async_refresh())
 
+        self._statistics_clear_in_progress = True
+        self._statistics_clear_completed = False
         recorder.async_clear_statistics(statistic_ids, on_done=_on_done)
-        try:
-            await asyncio.wait_for(done, timeout=600)
-        except TimeoutError as err:
-            raise UpdateFailed("Timed out clearing imported statistics") from err
 
     async def async_force_sync(self):
         _LOGGER.warning("Manual Sync Triggered by User")
@@ -159,9 +164,12 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         reset_requested = bool(conf.get(CONF_RESET_STATISTICS))
 
         if self._force_rebuild or reset_requested:
-            await self._clear_imported_statistics(
-                {account_id, conf.get(CONF_RESET_ACCOUNT)}
-            )
+            if not self._statistics_clear_completed:
+                self._schedule_clear_imported_statistics(
+                    {account_id, conf.get(CONF_RESET_ACCOUNT)}
+                )
+                raise UpdateFailed("Clearing imported statistics before rebuild")
+            self._statistics_clear_completed = False
 
         # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
