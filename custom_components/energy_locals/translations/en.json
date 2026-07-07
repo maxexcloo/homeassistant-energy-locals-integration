@@ -19,7 +19,8 @@
             "account_id": "Utility Account ID",
             "start_date": "Import Start Date (YYYY-MM-DD)",
             "usage_price_dollars": "Price per kWh ($)",
-            "supply_price_dollars": "Daily Supply Charge ($)"
+            "supply_price_dollars": "Daily Supply Charge ($)",
+            "reset_statistics": "Clear imported statistics and rebuild now"
         }
       }
     },

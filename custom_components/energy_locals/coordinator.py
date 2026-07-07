@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
+    clear_statistics,
     get_last_statistics,
     StatisticMetaData,
 )
@@ -24,6 +25,8 @@ from .const import (
     CONF_START_DATE,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_PRICE_SUPPLY_DOLLARS,
+    CONF_RESET_STATISTICS,
+    CONF_RESET_ACCOUNT,
 )
 from .api import EnergyLocalsAPI
 
@@ -49,6 +52,26 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._force_rebuild = False
         self._sync_lock = asyncio.Lock()
+
+    def _statistic_ids(self, account_id):
+        statistic_base = f"account_{account_id}"
+        return (
+            f"{DOMAIN}:{statistic_base}_usage",
+            f"{DOMAIN}:{statistic_base}_cost",
+        )
+
+    async def _clear_imported_statistics(self, account_ids):
+        statistic_ids = []
+        for account_id in account_ids:
+            if account_id:
+                statistic_ids.extend(self._statistic_ids(account_id))
+
+        if not statistic_ids:
+            return
+
+        _LOGGER.warning("Clearing Energy Locals statistics: %s", statistic_ids)
+        recorder = get_instance(self.hass)
+        await recorder.async_add_executor_job(clear_statistics, recorder, statistic_ids)
 
     async def async_force_sync(self):
         _LOGGER.warning("Manual Sync Triggered by User")
@@ -102,7 +125,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         is_initial_run = self.data is None
 
         # Logic: Run if Manual Force OR Initial Setup OR Lunch Time (12pm+)
-        should_run = self._force_rebuild or is_initial_run or (now_hour >= 12)
+        reset_requested = bool(self.entry.data.get(CONF_RESET_STATISTICS))
+        should_run = self._force_rebuild or reset_requested or is_initial_run or (now_hour >= 12)
 
         if not should_run:
             return self.data
@@ -119,9 +143,13 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         price_daily = float(conf.get(CONF_PRICE_SUPPLY_DOLLARS, 0.94))
 
         account_id = self.entry.data[CONF_ACCOUNT]
-        statistic_base = f"account_{account_id}"
-        id_e = f"{DOMAIN}:{statistic_base}_usage"
-        id_c = f"{DOMAIN}:{statistic_base}_cost"
+        id_e, id_c = self._statistic_ids(account_id)
+        reset_requested = bool(conf.get(CONF_RESET_STATISTICS))
+
+        if self._force_rebuild or reset_requested:
+            await self._clear_imported_statistics(
+                {account_id, conf.get(CONF_RESET_ACCOUNT)}
+            )
 
         # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
@@ -131,7 +159,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         g_cost = db_cost if db_cost is not None else 0.0
 
         today_syd = datetime.datetime.now(TZ_SYDNEY).date()
-        is_rebuilding = self._force_rebuild
+        is_rebuilding = self._force_rebuild or reset_requested
 
         # === CRITICAL: DETECT DATABASE CORRUPTION ===
         if not is_rebuilding:
@@ -329,6 +357,16 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         if self._force_rebuild:
             self._force_rebuild = False
+
+        if reset_requested:
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                data={
+                    **self.entry.data,
+                    CONF_RESET_STATISTICS: False,
+                    CONF_RESET_ACCOUNT: None,
+                },
+            )
 
         return {
             "total_kwh": g_kwh,

@@ -11,6 +11,8 @@ CONF_ACCOUNT = "account_id"
 CONF_START_DATE = "start_date"
 CONF_PRICE_USAGE_DOLLARS = "usage_price_dollars"
 CONF_PRICE_SUPPLY_DOLLARS = "supply_price_dollars"
+CONF_RESET_STATISTICS = "reset_statistics"
+CONF_RESET_ACCOUNT = "reset_account_id"
 
 # API
 API_BASE = "https://uml-myaccount-api-app-au.azurewebsites.net"
