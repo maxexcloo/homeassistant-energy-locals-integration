@@ -35,14 +35,12 @@ class EnergyLocalsSensor(CoordinatorEntity, SensorEntity):
             self._attr_name = "Usage"
             self._attr_device_class = SensorDeviceClass.ENERGY
             self._attr_native_unit_of_measurement = "kWh"
-            self._attr_state_class = SensorStateClass.TOTAL
 
         elif sens_type == "cost":
             self._attr_unique_id = f"{entry.entry_id}_cost"
             self._attr_name = "Cost"
             self._attr_device_class = SensorDeviceClass.MONETARY
             self._attr_native_unit_of_measurement = "AUD"
-            self._attr_state_class = SensorStateClass.TOTAL
 
         elif sens_type == "price":
             self._attr_unique_id = f"{entry.entry_id}_price"
