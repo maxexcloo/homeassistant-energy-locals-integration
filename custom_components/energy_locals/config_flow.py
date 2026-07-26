@@ -7,17 +7,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
-
-TZ_SYDNEY = ZoneInfo("Australia/Sydney")
-
-
-def _validate_date(value: str) -> str:
-    try:
-        datetime.date.fromisoformat(value)
-        return value
-    except (ValueError, TypeError):
-        raise vol.Invalid("Use YYYY-MM-DD format")
-
+from homeassistant.helpers.selector import DateSelector
 
 from .const import (
     DOMAIN,
@@ -39,6 +29,8 @@ from .tariffs import (
     tariff_for_date,
     upsert_tariff,
 )
+
+TZ_SYDNEY = ZoneInfo("Australia/Sydney")
 
 
 class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -83,7 +75,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
                 vol.Required(CONF_ACCOUNT): str,
-                vol.Required(CONF_START_DATE, default=default_date): _validate_date,
+                vol.Required(CONF_START_DATE, default=default_date): DateSelector(),
                 vol.Required(CONF_PRICE_USAGE_DOLLARS, default=0.359): vol.All(
                     vol.Coerce(float), vol.Range(min=0)
                 ),
@@ -155,7 +147,7 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                 ): cv.string,
                 vol.Required(
                     CONF_START_DATE, default=data.get(CONF_START_DATE)
-                ): _validate_date,
+                ): DateSelector(),
                 vol.Required(
                     CONF_PRICE_USAGE_DOLLARS,
                     default=current_tariff[CONF_PRICE_USAGE_DOLLARS],
@@ -164,9 +156,7 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                     CONF_PRICE_SUPPLY_DOLLARS,
                     default=current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
                 ): vol.All(vol.Coerce(float), vol.Range(min=0)),
-                vol.Optional(
-                    CONF_TARIFF_EFFECTIVE_DATE, default=""
-                ): vol.Any("", _validate_date),
+                vol.Optional(CONF_TARIFF_EFFECTIVE_DATE): DateSelector(),
                 vol.Optional(CONF_RESET_STATISTICS, default=False): cv.boolean,
             }
         )
