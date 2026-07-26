@@ -17,7 +17,7 @@ class EnergyLocalsSyncButton(CoordinatorEntity, ButtonEntity):
     def __init__(self, coordinator, entry):
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = "Energy Locals Force Rebuild"
+        self._attr_name = "Energy Locals Rebuild Statistics"
         self._attr_unique_id = f"{entry.entry_id}_force_rebuild"
         self._attr_icon = "mdi:database-refresh"
 

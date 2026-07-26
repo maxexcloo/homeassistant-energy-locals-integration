@@ -1,10 +1,14 @@
 """Config flow for the Energy Locals integration."""
 
 import datetime
+from zoneinfo import ZoneInfo
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
+
+TZ_SYDNEY = ZoneInfo("Australia/Sydney")
 
 
 def _validate_date(value: str) -> str:
@@ -23,16 +27,24 @@ from .const import (
     CONF_START_DATE,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_PRICE_SUPPLY_DOLLARS,
+    CONF_TARIFFS,
+    CONF_TARIFF_EFFECTIVE_DATE,
     CONF_RESET_STATISTICS,
     CONF_RESET_ACCOUNT,
 )
 from .api import EnergyLocalsAPI
+from .tariffs import (
+    TARIFF_EFFECTIVE_FROM,
+    normalise_tariffs,
+    tariff_for_date,
+    upsert_tariff,
+)
 
 
 class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energy Locals."""
 
-    VERSION = 1
+    VERSION = 2
 
     @staticmethod
     @callback
@@ -55,13 +67,16 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             try:
                 await self.hass.async_add_executor_job(api.login)
+                user_input[CONF_TARIFFS] = normalise_tariffs(user_input)
                 return self.async_create_entry(
                     title=f"Energy Locals ({user_input[CONF_ACCOUNT]})", data=user_input
                 )
             except Exception:
                 errors["base"] = "cannot_connect"
 
-        default_date = (datetime.date.today() - datetime.timedelta(days=30)).isoformat()
+        default_date = (
+            datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=30)
+        ).isoformat()
 
         schema = vol.Schema(
             {
@@ -69,11 +84,11 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PASSWORD): str,
                 vol.Required(CONF_ACCOUNT): str,
                 vol.Required(CONF_START_DATE, default=default_date): _validate_date,
-                vol.Required(CONF_PRICE_USAGE_DOLLARS, default=0.359): vol.Coerce(
-                    float
+                vol.Required(CONF_PRICE_USAGE_DOLLARS, default=0.359): vol.All(
+                    vol.Coerce(float), vol.Range(min=0)
                 ),
-                vol.Required(CONF_PRICE_SUPPLY_DOLLARS, default=0.94): vol.Coerce(
-                    float
+                vol.Required(CONF_PRICE_SUPPLY_DOLLARS, default=0.94): vol.All(
+                    vol.Coerce(float), vol.Range(min=0)
                 ),
             }
         )
@@ -87,8 +102,32 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
+            user_input = dict(user_input)
             title = f"Energy Locals ({user_input[CONF_ACCOUNT]})"
-            new_data = {**self._config_entry.data, **user_input}
+            effective_date = user_input.pop(CONF_TARIFF_EFFECTIVE_DATE, "")
+            usage_price = user_input.pop(CONF_PRICE_USAGE_DOLLARS)
+            supply_price = user_input.pop(CONF_PRICE_SUPPLY_DOLLARS)
+            tariffs = normalise_tariffs(self._config_entry.data)
+            if effective_date:
+                tariffs = upsert_tariff(
+                    tariffs, effective_date, usage_price, supply_price
+                )
+
+            current_tariff = tariff_for_date(
+                tariffs, datetime.datetime.now(TZ_SYDNEY).date()
+            )
+            new_data = {
+                **self._config_entry.data,
+                **user_input,
+                CONF_TARIFFS: tariffs,
+                # Retain these keys for backwards compatibility with older releases.
+                CONF_PRICE_USAGE_DOLLARS: current_tariff[
+                    CONF_PRICE_USAGE_DOLLARS
+                ],
+                CONF_PRICE_SUPPLY_DOLLARS: current_tariff[
+                    CONF_PRICE_SUPPLY_DOLLARS
+                ],
+            }
             if user_input.get(CONF_RESET_STATISTICS):
                 new_data[CONF_RESET_ACCOUNT] = self._config_entry.data.get(CONF_ACCOUNT)
             self.hass.config_entries.async_update_entry(
@@ -97,6 +136,18 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         data = self._config_entry.data
+        tariffs = normalise_tariffs(data)
+        current_tariff = tariff_for_date(
+            tariffs, datetime.datetime.now(TZ_SYDNEY).date()
+        )
+        schedule = "\n".join(
+            (
+                f"{item[TARIFF_EFFECTIVE_FROM]}: "
+                f"${item[CONF_PRICE_USAGE_DOLLARS]:g}/kWh, "
+                f"${item[CONF_PRICE_SUPPLY_DOLLARS]:g}/day"
+            )
+            for item in tariffs
+        )
         schema = vol.Schema(
             {
                 vol.Required(
@@ -104,15 +155,23 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                 ): cv.string,
                 vol.Required(
                     CONF_START_DATE, default=data.get(CONF_START_DATE)
-                ): cv.string,
+                ): _validate_date,
                 vol.Required(
-                    CONF_PRICE_USAGE_DOLLARS, default=data.get(CONF_PRICE_USAGE_DOLLARS)
-                ): vol.Coerce(float),
+                    CONF_PRICE_USAGE_DOLLARS,
+                    default=current_tariff[CONF_PRICE_USAGE_DOLLARS],
+                ): vol.All(vol.Coerce(float), vol.Range(min=0)),
                 vol.Required(
                     CONF_PRICE_SUPPLY_DOLLARS,
-                    default=data.get(CONF_PRICE_SUPPLY_DOLLARS),
-                ): vol.Coerce(float),
+                    default=current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
+                ): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                vol.Optional(
+                    CONF_TARIFF_EFFECTIVE_DATE, default=""
+                ): vol.Any("", _validate_date),
                 vol.Optional(CONF_RESET_STATISTICS, default=False): cv.boolean,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+            description_placeholders={"tariff_schedule": schedule},
+        )

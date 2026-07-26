@@ -24,10 +24,17 @@ from .const import (
     CONF_START_DATE,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_PRICE_SUPPLY_DOLLARS,
+    CONF_TARIFFS,
     CONF_RESET_STATISTICS,
     CONF_RESET_ACCOUNT,
 )
 from .api import EnergyLocalsAPI
+from .tariffs import (
+    daily_supply_charge,
+    interval_usage_cost,
+    normalise_tariffs,
+    tariff_for_date,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,6 +102,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         self._force_rebuild = True
         await self.async_refresh()
 
+    def _rebuild_failed(self, message: str) -> UpdateFailed:
+        """End a requested rebuild without leaving every sync in rebuild mode."""
+        self._force_rebuild = False
+        return UpdateFailed(message)
+
     async def _get_db_total(self, statistic_id):
         try:
             recorder = get_instance(self.hass)
@@ -156,14 +168,16 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         start_date_raw = datetime.datetime.strptime(
             conf[CONF_START_DATE], "%Y-%m-%d"
         ).date()
-        price_kwh = float(conf.get(CONF_PRICE_USAGE_DOLLARS, 0.359))
-        price_daily = float(conf.get(CONF_PRICE_SUPPLY_DOLLARS, 0.94))
+        tariffs = normalise_tariffs(conf)
 
         account_id = self.entry.data[CONF_ACCOUNT]
         id_e, id_c = self._statistic_ids(account_id)
         reset_requested = bool(conf.get(CONF_RESET_STATISTICS))
 
-        if self._force_rebuild or reset_requested:
+        # A normal rebuild upserts regenerated rows in place. Only the explicit
+        # reset option clears statistics, because clearing first can destroy
+        # history if the upstream API no longer returns an older day.
+        if reset_requested:
             if not self._statistics_clear_completed:
                 self._schedule_clear_imported_statistics(
                     {account_id, conf.get(CONF_RESET_ACCOUNT)}
@@ -179,6 +193,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         g_cost = db_cost if db_cost is not None else 0.0
 
         today_syd = datetime.datetime.now(TZ_SYDNEY).date()
+        current_tariff = tariff_for_date(tariffs, today_syd)
+        price_kwh = current_tariff[CONF_PRICE_USAGE_DOLLARS]
+        price_daily = current_tariff[CONF_PRICE_SUPPLY_DOLLARS]
         is_rebuilding = self._force_rebuild or reset_requested
 
         # === CRITICAL: DETECT DATABASE CORRUPTION ===
@@ -251,6 +268,12 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             within_grace = days_old <= _DATA_GRACE_DAYS
 
             if not usage_data:
+                if is_rebuilding:
+                    # Rebuild data is staged in memory until the entire date range
+                    # succeeds. Never overwrite later cumulative rows after a gap.
+                    raise self._rebuild_failed(
+                        f"Rebuild stopped: no usage data available for {curr}"
+                    )
                 if within_grace:
                     # Data not yet published — stop here so we don't skip this day
                     # and corrupt sums for all subsequent days. Retry next sync.
@@ -261,14 +284,20 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 curr += timedelta(days=1)
                 continue
 
-            if within_grace and not self._is_day_complete(usage_data):
+            if (within_grace or is_rebuilding) and not self._is_day_complete(
+                usage_data
+            ):
                 # Partial day — API hasn't published through 23:30 yet.
                 # Stop here to avoid writing an incomplete sum that corrupts future days.
+                if is_rebuilding:
+                    raise self._rebuild_failed(
+                        f"Rebuild stopped: incomplete usage data for {curr}"
+                    )
                 _LOGGER.debug("Day %s incomplete (no 23:30 interval), stopping sync.", curr)
                 break
 
             buckets = {}
-            day_total_kwh = 0.0
+            day_tariff = tariff_for_date(tariffs, curr)
 
             for p in usage_data:
                 try:
@@ -292,15 +321,18 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
                 val = self._extract_value(p)
                 buckets[t_utc]["kwh"] += val
-                buckets[t_utc]["cost"] += val * price_kwh
-                day_total_kwh += val
+                buckets[t_utc]["cost"] += interval_usage_cost(val, day_tariff)
 
-            if day_total_kwh < 0.001:
+            if not buckets:
+                if is_rebuilding:
+                    raise self._rebuild_failed(
+                        f"Rebuild stopped: no valid usage intervals for {curr}"
+                    )
                 curr += timedelta(days=1)
                 continue
 
             first_key = sorted(buckets.keys())[0]
-            buckets[first_key]["cost"] += price_daily
+            buckets[first_key]["cost"] += daily_supply_charge(day_tariff)
 
             st_e, st_c = [], []
             for t in sorted(buckets.keys()):
@@ -392,5 +424,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             "total_kwh": g_kwh,
             "total_cost": g_cost,
             "price": price_kwh,
+            "supply_price": price_daily,
+            CONF_TARIFFS: tariffs,
             "last_synced": dt_util.now(),
         }

@@ -5,13 +5,32 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_ACCOUNT
+from .const import (
+    DOMAIN,
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    CONF_ACCOUNT,
+    CONF_TARIFFS,
+)
 from .api import EnergyLocalsAPI
 from .coordinator import EnergyLocalsCoordinator
+from .tariffs import normalise_tariffs
 
 PLATFORMS = ["sensor", "button"]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate a single-price entry to an effective-dated tariff schedule."""
+    if entry.version == 1:
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_TARIFFS: normalise_tariffs(entry.data)},
+            version=2,
+        )
+        _LOGGER.info("Migrated Energy Locals tariff configuration to version 2")
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

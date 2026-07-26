@@ -26,11 +26,13 @@
     "step": {
       "init": {
         "title": "Update Energy Locals",
+        "description": "Configured tariff schedule:\n{tariff_schedule}\n\nTo add or replace a tariff, enter its prices and effective date. Leave the effective date blank to keep the schedule unchanged. For a past effective date, use Rebuild Statistics afterward to recalculate historical cost.",
         "data": {
           "account_id": "Utility Account ID",
           "start_date": "Import Start Date (YYYY-MM-DD)",
-          "usage_price_dollars": "Price per kWh ($)",
-          "supply_price_dollars": "Daily Supply Charge ($)",
+          "usage_price_dollars": "Tariff price per kWh ($)",
+          "supply_price_dollars": "Tariff daily supply charge ($)",
+          "tariff_effective_date": "Add or replace tariff effective from (YYYY-MM-DD)",
           "reset_statistics": "Clear imported statistics and rebuild now"
         }
       }

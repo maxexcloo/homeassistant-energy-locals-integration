@@ -7,7 +7,7 @@ Imports interval usage data from [Energy Locals Urban](https://urban.energylocal
 - Half-hourly interval data imported as hourly long-term statistics
 - Tracks cumulative kWh usage and cost (with configurable daily supply charge)
 - Automatic corruption detection and self-healing rebuild
-- Manual force-rebuild button entity
+- Manual non-destructive statistics rebuild button
 - Supports multiple accounts
 
 ## Installation
@@ -50,7 +50,15 @@ Because this integration imports statistics directly (not via sensor state chang
 
 ## Updating Prices
 
-Go to **Settings → Devices & Services → Energy Locals → Configure** to update your kWh rate or supply charge. Changes take effect on the next sync; historical statistics are not retroactively recalculated.
+Go to **Settings → Devices & Services → Energy Locals → Configure** to add a
+tariff with its effective date, kWh rate, and daily supply charge. Future-dated
+tariffs become active automatically. Imports and rebuilds select the tariff that
+was active on each usage day, so later price changes do not alter earlier costs.
+
+Entering the same effective date again replaces that tariff period. Leave the
+effective-date field blank to keep the tariff schedule unchanged. If adding or
+correcting a tariff that is already in effect, press **Rebuild Statistics**
+afterward to recalculate the affected historical cost.
 
 ## Entities
 
@@ -60,4 +68,4 @@ Go to **Settings → Devices & Services → Energy Locals → Configure** to upd
 | `sensor.energy_locals_cost` | Cumulative cost in AUD |
 | `sensor.energy_locals_usage_price` | Configured rate ($/kWh) |
 | `sensor.energy_locals_last_synced` | Timestamp of last successful sync |
-| `button.energy_locals_force_rebuild` | Wipe and re-import all history |
+| `button.energy_locals_force_rebuild` | Recalculate and upsert all available history |
