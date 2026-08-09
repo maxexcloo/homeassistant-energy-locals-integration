@@ -1,12 +1,13 @@
 {
+  "domain": "energy_locals",
+  "name": "Energy Locals",
   "codeowners": ["@maxexcloo"],
   "config_flow": true,
+  "dependencies": ["recorder"],
   "documentation": "https://github.com/maxexcloo/homeassistant-energy-locals-integration",
-  "domain": "energy_locals",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/maxexcloo/homeassistant-energy-locals-integration/issues",
-  "name": "Energy Locals",
   "requirements": [],
   "version": "1.2.0"
 }
