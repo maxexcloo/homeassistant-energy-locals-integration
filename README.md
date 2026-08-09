@@ -69,3 +69,7 @@ afterward to recalculate the affected historical cost.
 | `sensor.energy_locals_last_synced` | Timestamp of last successful sync |
 | `sensor.energy_locals_usage` | Cumulative kWh total |
 | `sensor.energy_locals_usage_price` | Configured rate ($/kWh) |
+
+## Licence
+
+AGPL-3.0 - see [LICENSE](LICENSE).
