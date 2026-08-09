@@ -4,19 +4,20 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
+from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
-    DOMAIN,
-    CONF_USERNAME,
-    CONF_PASSWORD,
     CONF_ACCOUNT,
+    CONF_PASSWORD,
     CONF_TARIFFS,
+    CONF_USERNAME,
+    DOMAIN,
 )
-from .api import EnergyLocalsAPI
 from .coordinator import EnergyLocalsCoordinator
 from .tariffs import normalise_tariffs
 
-PLATFORMS = ["sensor", "button"]
+PLATFORMS = ["button", "sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +43,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     account_id = entry.data[CONF_ACCOUNT]
 
     api = EnergyLocalsAPI(username, password, account_id)
+    try:
+        await hass.async_add_executor_job(api.login)
+    except EnergyLocalsAuthError as err:
+        raise ConfigEntryAuthFailed("Invalid Energy Locals credentials") from err
+    except EnergyLocalsAPIError as err:
+        raise ConfigEntryNotReady("Unable to connect to Energy Locals") from err
+
     coordinator = EnergyLocalsCoordinator(hass, api, entry)
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
@@ -64,6 +72,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-async def update_listener(hass: HomeAssistant, entry: ConfigEntry):
+async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload when config changes."""
     await hass.config_entries.async_reload(entry.entry_id)

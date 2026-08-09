@@ -12,14 +12,48 @@
           "usage_price_dollars": "Price per kWh ($)",
           "supply_price_dollars": "Daily Supply Charge ($)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect to Energy Locals",
+        "description": "Enter your current MyAccount credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
+      "already_configured": "This Energy Locals utility account is already configured.",
       "cannot_connect": "Failed to connect. Check credentials.",
-      "invalid_auth": "Invalid authentication."
+      "invalid_account": "The utility account could not be accessed with these credentials.",
+      "invalid_auth": "Invalid authentication.",
+      "start_date_before_tariff": "The import start date must be on or after the first configured tariff."
     },
     "abort": {
-      "already_configured": "This Energy Locals utility account is already configured."
+      "already_configured": "This Energy Locals utility account is already configured.",
+      "reauth_entry_missing": "The Energy Locals configuration entry no longer exists.",
+      "reauth_successful": "Energy Locals was reconnected successfully."
+    }
+  },
+  "entity": {
+    "button": {
+      "rebuild_statistics": {
+        "name": "Rebuild statistics"
+      }
+    },
+    "sensor": {
+      "cost": {
+        "name": "Cost"
+      },
+      "last_synced": {
+        "name": "Last synced"
+      },
+      "usage": {
+        "name": "Usage"
+      },
+      "usage_price": {
+        "name": "Usage price"
+      }
     }
   },
   "options": {

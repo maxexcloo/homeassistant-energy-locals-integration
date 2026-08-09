@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import math
 from typing import Any
 
 from .const import (
@@ -20,6 +21,8 @@ def _tariff(effective_from: str, usage_price: Any, supply_price: Any) -> dict:
     effective = datetime.date.fromisoformat(effective_from)
     usage = float(usage_price)
     supply = float(supply_price)
+    if not math.isfinite(usage) or not math.isfinite(supply):
+        raise ValueError("Tariff prices must be finite")
     if usage < 0 or supply < 0:
         raise ValueError("Tariff prices cannot be negative")
     return {

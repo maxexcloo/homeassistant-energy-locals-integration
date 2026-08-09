@@ -1,34 +1,37 @@
 """Coordinator for the Energy Locals integration."""
 
+import asyncio
 import datetime
 import logging
+import math
 from datetime import timedelta
-import asyncio
 from zoneinfo import ZoneInfo
 
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.util import dt as dt_util
 from homeassistant.components.recorder import get_instance
+from homeassistant.components.recorder.models import StatisticData, StatisticMeanType
 from homeassistant.components.recorder.statistics import (
+    StatisticMetaData,
     async_add_external_statistics,
     get_last_statistics,
-    StatisticMetaData,
 )
-from homeassistant.components.recorder.models import StatisticData, StatisticMeanType
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
+from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
-    DOMAIN,
     CONF_ACCOUNT,
-    CONF_START_DATE,
-    CONF_PRICE_USAGE_DOLLARS,
     CONF_PRICE_SUPPLY_DOLLARS,
-    CONF_TARIFFS,
-    CONF_RESET_STATISTICS,
+    CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
+    CONF_RESET_STATISTICS,
+    CONF_START_DATE,
+    CONF_TARIFFS,
+    DOMAIN,
 )
-from .api import EnergyLocalsAPI
+from .statistics import statistic_series_out_of_sync
 from .tariffs import (
     daily_supply_charge,
     interval_usage_cost,
@@ -119,18 +122,20 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 if isinstance(start, datetime.datetime):
                     start = start.timestamp()
                 return record.get("sum"), start
-        except Exception:
-            pass
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Unable to read statistic %s: %s", statistic_id, err)
         return None, None
 
     def _extract_value(self, point):
         for key in ["y", "value", "val", "usage", "amount"]:
             if key in point:
                 try:
-                    return max(0.0, float(point[key]))
+                    value = float(point[key])
                 except (ValueError, TypeError):
                     continue
-        return 0.0
+                if math.isfinite(value):
+                    return max(0.0, value)
+        raise ValueError("Usage interval did not contain a finite numeric value")
 
     def _is_day_complete(self, usage_data: list) -> bool:
         """Return True if the 23:30 interval is present, meaning the full day is published."""
@@ -155,7 +160,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         # Logic: Run if Manual Force OR Initial Setup OR Lunch Time (12pm+)
         reset_requested = bool(self.entry.data.get(CONF_RESET_STATISTICS))
-        should_run = self._force_rebuild or reset_requested or is_initial_run or (now_hour >= 12)
+        should_run = (
+            self._force_rebuild or reset_requested or is_initial_run or (now_hour >= 12)
+        )
 
         if not should_run:
             return self.data
@@ -165,9 +172,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
     async def _perform_sync(self):
         conf = self.entry.data
-        start_date_raw = datetime.datetime.strptime(
-            conf[CONF_START_DATE], "%Y-%m-%d"
-        ).date()
+        start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
         tariffs = normalise_tariffs(conf)
 
         account_id = self.entry.data[CONF_ACCOUNT]
@@ -187,7 +192,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
-        db_cost, _ = await self._get_db_total(id_c)
+        db_cost, last_ts_c = await self._get_db_total(id_c)
 
         g_kwh = db_kwh if db_kwh is not None else 0.0
         g_cost = db_cost if db_cost is not None else 0.0
@@ -197,6 +202,14 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         price_kwh = current_tariff[CONF_PRICE_USAGE_DOLLARS]
         price_daily = current_tariff[CONF_PRICE_SUPPLY_DOLLARS]
         is_rebuilding = self._force_rebuild or reset_requested
+
+        series_out_of_sync = statistic_series_out_of_sync(last_ts_e, last_ts_c)
+        if series_out_of_sync and not is_rebuilding:
+            _LOGGER.warning(
+                "Energy Locals usage and cost statistics are out of sync; "
+                "staging an automatic rebuild"
+            )
+            is_rebuilding = True
 
         # === CRITICAL: DETECT DATABASE CORRUPTION ===
         if not is_rebuilding:
@@ -214,7 +227,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 ).astimezone(TZ_SYDNEY)
                 if last_dt_syd.date() >= today_syd:
                     _LOGGER.warning(
-                        f"Invalid future data detected ({last_dt_syd.date()}). Forcing Auto-Rebuild."
+                        "Invalid future data detected (%s); forcing automatic rebuild",
+                        last_dt_syd.date(),
                     )
                     is_rebuilding = True
 
@@ -239,10 +253,12 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 "total_kwh": g_kwh,
                 "total_cost": g_cost,
                 "price": price_kwh,
+                "supply_price": price_daily,
+                CONF_TARIFFS: tariffs,
                 "last_synced": dt_util.now(),
             }
 
-        _LOGGER.info(f"Syncing from {curr}")
+        _LOGGER.info("Syncing Energy Locals statistics from %s", curr)
 
         st_e_all = []
         st_c_all = []
@@ -261,8 +277,15 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     if isinstance(data, list) and len(data) > 0:
                         usage_data = data
                         break
-                except Exception:
-                    pass
+                except EnergyLocalsAuthError as err:
+                    raise ConfigEntryAuthFailed(
+                        "Energy Locals credentials are no longer valid"
+                    ) from err
+                except EnergyLocalsAPIError as err:
+                    if attempt == 3:
+                        raise UpdateFailed(
+                            f"Unable to fetch Energy Locals data for {curr}"
+                        ) from err
 
             days_old = (today_syd - curr).days
             within_grace = days_old <= _DATA_GRACE_DAYS
@@ -280,7 +303,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("No data for %s yet, stopping sync.", curr)
                     break
                 # Beyond grace period: genuine gap, advance past it.
-                _LOGGER.debug("No data for %s (beyond %d-day grace), skipping.", curr, _DATA_GRACE_DAYS)
+                _LOGGER.debug(
+                    "No data for %s (beyond %d-day grace), skipping",
+                    curr,
+                    _DATA_GRACE_DAYS,
+                )
                 curr += timedelta(days=1)
                 continue
 
@@ -293,7 +320,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     raise self._rebuild_failed(
                         f"Rebuild stopped: incomplete usage data for {curr}"
                     )
-                _LOGGER.debug("Day %s incomplete (no 23:30 interval), stopping sync.", curr)
+                _LOGGER.debug(
+                    "Day %s incomplete (no 23:30 interval), stopping sync", curr
+                )
                 break
 
             buckets = {}
@@ -319,7 +348,16 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 if t_utc not in buckets:
                     buckets[t_utc] = {"kwh": 0.0, "cost": 0.0}
 
-                val = self._extract_value(p)
+                try:
+                    val = self._extract_value(p)
+                except ValueError as err:
+                    raise UpdateFailed(
+                        f"Invalid Energy Locals usage interval for {curr}"
+                    ) from err
+                if not math.isfinite(val):
+                    raise UpdateFailed(
+                        f"Non-finite Energy Locals usage interval for {curr}"
+                    )
                 buckets[t_utc]["kwh"] += val
                 buckets[t_utc]["cost"] += interval_usage_cost(val, day_tariff)
 
@@ -331,7 +369,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 curr += timedelta(days=1)
                 continue
 
-            first_key = sorted(buckets.keys())[0]
+            first_key = min(buckets)
             buckets[first_key]["cost"] += daily_supply_charge(day_tariff)
 
             st_e, st_c = [], []
@@ -353,7 +391,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # 5. FINAL SAFETY & DB WRITE
         if db_kwh and g_kwh < db_kwh and not is_rebuilding:
             _LOGGER.warning(
-                f"Monotonic Error ({g_kwh} < {db_kwh}). Aborting DB write to prevent negative drops."
+                "Monotonic error (%s < %s); aborting database write to prevent "
+                "negative drops",
+                g_kwh,
+                db_kwh,
             )
             return {
                 "total_kwh": db_kwh,
@@ -397,7 +438,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         if g_kwh == 0.0:
             if db_kwh and db_kwh > 0:
                 _LOGGER.warning(
-                    f"Sync resulted in 0.0, falling back to last valid DB value: {db_kwh}"
+                    "Sync resulted in 0.0; falling back to the last valid database "
+                    "value: %s",
+                    db_kwh,
                 )
                 return {
                     "total_kwh": db_kwh,

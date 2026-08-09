@@ -32,6 +32,16 @@ from custom_components.energy_locals.tariffs import (
 
 
 class TariffTests(unittest.TestCase):
+    def test_non_finite_prices_are_rejected(self):
+        with self.assertRaises(ValueError):
+            normalise_tariffs(
+                {
+                    CONF_START_DATE: "2026-01-10",
+                    CONF_PRICE_USAGE_DOLLARS: float("inf"),
+                    CONF_PRICE_SUPPLY_DOLLARS: 0.82,
+                }
+            )
+
     def test_legacy_prices_become_initial_tariff(self):
         tariffs = normalise_tariffs(
             {
