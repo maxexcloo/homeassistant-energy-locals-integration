@@ -4,11 +4,11 @@ Imports interval usage data from [Energy Locals Urban](https://urban.energylocal
 
 ## Features
 
-- Half-hourly interval data imported as hourly long-term statistics
-- Tracks cumulative kWh usage and cost (with configurable daily supply charge)
 - Automatic corruption detection and self-healing rebuild
+- Half-hourly interval data imported as hourly long-term statistics
 - Manual non-destructive statistics rebuild button
 - Supports multiple accounts
+- Tracks cumulative kWh usage and cost (with configurable daily supply charge)
 
 ## Installation
 
@@ -64,8 +64,8 @@ afterward to recalculate the affected historical cost.
 
 | Entity | Description |
 |---|---|
-| `sensor.energy_locals_usage` | Cumulative kWh total |
-| `sensor.energy_locals_cost` | Cumulative cost in AUD |
-| `sensor.energy_locals_usage_price` | Configured rate ($/kWh) |
-| `sensor.energy_locals_last_synced` | Timestamp of last successful sync |
 | `button.energy_locals_force_rebuild` | Recalculate and upsert all available history |
+| `sensor.energy_locals_cost` | Cumulative cost in AUD |
+| `sensor.energy_locals_last_synced` | Timestamp of last successful sync |
+| `sensor.energy_locals_usage` | Cumulative kWh total |
+| `sensor.energy_locals_usage_price` | Configured rate ($/kWh) |
