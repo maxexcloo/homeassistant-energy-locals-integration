@@ -3,6 +3,8 @@
 ## Structure
 
 - Keep the integration in `custom_components/energy_locals/`.
+- Keep only `AGENTS.md` and `README.md` as root Markdown files; put other project
+  documentation in `docs/`.
 - Keep tests in `tests/`.
 - Keep user-visible strings in `translations/en.json`.
 
@@ -16,7 +18,8 @@
 - Sort imports with Ruff and keep constants and helpers consistently ordered.
 - Keep configuration and entity names stable unless a migration is included.
 - Preserve `LICENSE` and its legal text; never relicense without explicit approval.
-- Use `.yaml` for GitHub Actions workflows.
+- Use `.yaml`, never `.yml`, for project-owned YAML files unless external tooling
+  requires a fixed filename.
 - Use Australian English throughout authored prose and every project-owned name,
   including identifiers, configuration keys, environment variables, paths, CLI
   commands, and options. Update every producer and consumer together; preserve only

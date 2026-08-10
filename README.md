@@ -28,14 +28,14 @@ Copy the `custom_components/energy_locals/` folder into your HA `config/custom_c
 
 Go to **Settings → Devices & Services → Add Integration** and search for **Energy Locals**.
 
-| Field | Description |
-|---|---|
-| Username | Your Energy Locals MyAccount email |
-| Password | Your Energy Locals MyAccount password |
-| Utility Account ID | Found in your account portal (e.g. `404297`) |
-| Import Start Date | Earliest date to import data from (`YYYY-MM-DD`) |
-| Price per kWh | Your usage rate in AUD (e.g. `0.359`) |
-| Daily Supply Charge | Daily fixed charge in AUD (e.g. `0.94`) |
+| Field               | Description                                      |
+| ------------------- | ------------------------------------------------ |
+| Username            | Your Energy Locals MyAccount email               |
+| Password            | Your Energy Locals MyAccount password            |
+| Utility Account ID  | Found in your account portal (e.g. `404297`)     |
+| Import Start Date   | Earliest date to import data from (`YYYY-MM-DD`) |
+| Price per kWh       | Your usage rate in AUD (e.g. `0.359`)            |
+| Daily Supply Charge | Daily fixed charge in AUD (e.g. `0.94`)          |
 
 To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network, and look for a request to `/utility-accounts/{id}/usage-chart`.
 
@@ -62,13 +62,13 @@ afterward to recalculate the affected historical cost.
 
 ## Entities
 
-| Entity | Description |
-|---|---|
+| Entity                               | Description                                  |
+| ------------------------------------ | -------------------------------------------- |
 | `button.energy_locals_force_rebuild` | Recalculate and upsert all available history |
-| `sensor.energy_locals_cost` | Cumulative cost in AUD |
-| `sensor.energy_locals_last_synced` | Timestamp of last successful sync |
-| `sensor.energy_locals_usage` | Cumulative kWh total |
-| `sensor.energy_locals_usage_price` | Configured rate ($/kWh) |
+| `sensor.energy_locals_cost`          | Cumulative cost in AUD                       |
+| `sensor.energy_locals_last_synced`   | Timestamp of last successful sync            |
+| `sensor.energy_locals_usage`         | Cumulative kWh total                         |
+| `sensor.energy_locals_usage_price`   | Configured rate ($/kWh)                      |
 
 ## Licence
 
