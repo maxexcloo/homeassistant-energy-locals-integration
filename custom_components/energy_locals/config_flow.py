@@ -68,27 +68,30 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_abort(reason="already_configured")
             self._abort_if_unique_id_configured()
 
-            api = EnergyLocalsAPI(
-                user_input[CONF_USERNAME],
-                user_input[CONF_PASSWORD],
-                user_input[CONF_ACCOUNT],
-            )
-            try:
-                await self.hass.async_add_executor_job(api.login)
-                yesterday = datetime.datetime.now(
-                    TZ_SYDNEY
-                ).date() - datetime.timedelta(days=1)
-                await self.hass.async_add_executor_job(api.get_data, yesterday)
-                user_input[CONF_TARIFFS] = normalise_tariffs(user_input)
-                return self.async_create_entry(
-                    title=f"Energy Locals ({user_input[CONF_ACCOUNT]})", data=user_input
+            today = datetime.datetime.now(TZ_SYDNEY).date()
+            if datetime.date.fromisoformat(user_input[CONF_START_DATE]) > today:
+                errors["base"] = "start_date_future"
+            else:
+                api = EnergyLocalsAPI(
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
+                    user_input[CONF_ACCOUNT],
                 )
-            except EnergyLocalsAuthError:
-                errors["base"] = "invalid_auth"
-            except EnergyLocalsAccountError:
-                errors["base"] = "invalid_account"
-            except EnergyLocalsAPIError:
-                errors["base"] = "cannot_connect"
+                try:
+                    await self.hass.async_add_executor_job(api.login)
+                    yesterday = today - datetime.timedelta(days=1)
+                    await self.hass.async_add_executor_job(api.get_data, yesterday)
+                    user_input[CONF_TARIFFS] = normalise_tariffs(user_input)
+                    return self.async_create_entry(
+                        title=f"Energy Locals ({user_input[CONF_ACCOUNT]})",
+                        data=user_input,
+                    )
+                except EnergyLocalsAuthError:
+                    errors["base"] = "invalid_auth"
+                except EnergyLocalsAccountError:
+                    errors["base"] = "invalid_account"
+                except EnergyLocalsAPIError:
+                    errors["base"] = "cannot_connect"
 
         default_date = (
             datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=30)
@@ -190,7 +193,8 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
             if duplicate:
                 errors["base"] = "already_configured"
 
-            if account_id != self._config_entry.data.get(CONF_ACCOUNT):
+            account_changed = account_id != self._config_entry.data.get(CONF_ACCOUNT)
+            if account_changed and not duplicate:
                 api = EnergyLocalsAPI(
                     self._config_entry.data[CONF_USERNAME],
                     self._config_entry.data[CONF_PASSWORD],
@@ -210,11 +214,16 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                     errors["base"] = "cannot_connect"
 
             try:
+                start_date = datetime.date.fromisoformat(user_input[CONF_START_DATE])
                 tariff_for_date(
-                    tariffs, datetime.date.fromisoformat(user_input[CONF_START_DATE])
+                    tariffs,
+                    start_date,
                 )
             except ValueError:
                 errors["base"] = "start_date_before_tariff"
+            else:
+                if start_date > datetime.datetime.now(TZ_SYDNEY).date():
+                    errors["base"] = "start_date_future"
 
             if errors:
                 return self._show_options_form(form_data, tariffs, errors)
@@ -230,7 +239,8 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                 CONF_PRICE_SUPPLY_DOLLARS: current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
                 CONF_PRICE_USAGE_DOLLARS: current_tariff[CONF_PRICE_USAGE_DOLLARS],
             }
-            if user_input.get(CONF_RESET_STATISTICS):
+            if account_changed or user_input.get(CONF_RESET_STATISTICS):
+                new_data[CONF_RESET_STATISTICS] = True
                 new_data[CONF_RESET_ACCOUNT] = self._config_entry.data.get(CONF_ACCOUNT)
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
@@ -273,17 +283,11 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                 ): DateSelector(),
                 vol.Required(
                     CONF_PRICE_USAGE_DOLLARS,
-                    default=data.get(
-                        CONF_PRICE_USAGE_DOLLARS,
-                        current_tariff[CONF_PRICE_USAGE_DOLLARS],
-                    ),
+                    default=current_tariff[CONF_PRICE_USAGE_DOLLARS],
                 ): _finite_non_negative_price,
                 vol.Required(
                     CONF_PRICE_SUPPLY_DOLLARS,
-                    default=data.get(
-                        CONF_PRICE_SUPPLY_DOLLARS,
-                        current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
-                    ),
+                    default=current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
                 ): _finite_non_negative_price,
                 effective_date_field: DateSelector(),
                 vol.Optional(

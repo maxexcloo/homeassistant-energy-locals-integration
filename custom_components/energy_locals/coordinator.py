@@ -1,5 +1,7 @@
 """Coordinator for the Energy Locals integration."""
 
+from __future__ import annotations
+
 import asyncio
 import datetime
 import logging
@@ -8,7 +10,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
-from homeassistant.components.recorder.models import StatisticData, StatisticMeanType
+from homeassistant.components.recorder.models import StatisticData
 from homeassistant.components.recorder.statistics import (
     StatisticMetaData,
     async_add_external_statistics,
@@ -20,15 +22,20 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+try:
+    from homeassistant.components.recorder.models import StatisticMeanType
+except ImportError:  # Home Assistant before 2025.11
+    _STATISTIC_MEAN_NONE = None
+else:
+    _STATISTIC_MEAN_NONE = StatisticMeanType.NONE
+
 from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
     CONF_ACCOUNT,
-    CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
-    CONF_TARIFFS,
     DOMAIN,
 )
 from .statistics import statistic_series_out_of_sync
@@ -49,6 +56,24 @@ TZ_UTC = datetime.timezone.utc
 _DATA_GRACE_DAYS = 3
 
 
+def _statistic_metadata(
+    *, name: str, statistic_id: str, unit: str, unit_class: str | None
+) -> StatisticMetaData:
+    """Build recorder metadata compatible with supported Home Assistant versions."""
+    metadata = {
+        "has_mean": False,
+        "has_sum": True,
+        "name": name,
+        "source": DOMAIN,
+        "statistic_id": statistic_id,
+        "unit_of_measurement": unit,
+    }
+    if _STATISTIC_MEAN_NONE is not None:
+        metadata["mean_type"] = _STATISTIC_MEAN_NONE
+        metadata["unit_class"] = unit_class
+    return StatisticMetaData(**metadata)
+
+
 class EnergyLocalsCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, api: EnergyLocalsAPI, entry: ConfigEntry):
         super().__init__(
@@ -61,8 +86,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._force_rebuild = False
         self._sync_lock = asyncio.Lock()
-        self._statistics_clear_in_progress = False
-        self._statistics_clear_completed = False
 
     def _statistic_ids(self, account_id):
         statistic_base = f"account_{account_id}"
@@ -71,44 +94,59 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             f"{DOMAIN}:{statistic_base}_cost",
         )
 
-    def _schedule_clear_imported_statistics(self, account_ids):
+    async def _async_clear_imported_statistics(self, account_ids):
+        """Clear imported statistics after replacement data has been validated."""
         statistic_ids = []
-        for account_id in account_ids:
+        for account_id in sorted(account_ids, key=lambda value: value or ""):
             if account_id:
                 statistic_ids.extend(self._statistic_ids(account_id))
 
         if not statistic_ids:
-            self._statistics_clear_completed = True
-            return
-
-        if self._statistics_clear_in_progress:
             return
 
         _LOGGER.warning("Clearing Energy Locals statistics: %s", statistic_ids)
         recorder = get_instance(self.hass)
+        done = self.hass.loop.create_future()
 
         def _on_done(*_args):
-            self.hass.loop.call_soon_threadsafe(_clear_done)
+            self.hass.loop.call_soon_threadsafe(_set_done)
 
-        def _clear_done():
-            self._statistics_clear_in_progress = False
-            self._statistics_clear_completed = True
-            self._force_rebuild = True
-            self.hass.async_create_task(self.async_refresh())
+        def _set_done():
+            if not done.done():
+                done.set_result(None)
 
-        self._statistics_clear_in_progress = True
-        self._statistics_clear_completed = False
         recorder.async_clear_statistics(statistic_ids, on_done=_on_done)
+        try:
+            await asyncio.wait_for(done, timeout=60)
+        except TimeoutError as err:
+            raise UpdateFailed("Timed out clearing imported statistics") from err
 
     async def async_force_sync(self):
-        _LOGGER.warning("Manual Sync Triggered by User")
+        _LOGGER.info("Manual statistics rebuild requested")
         self._force_rebuild = True
         await self.async_refresh()
 
-    def _rebuild_failed(self, message: str) -> UpdateFailed:
-        """End a requested rebuild without leaving every sync in rebuild mode."""
-        self._force_rebuild = False
-        return UpdateFailed(message)
+    def _consume_reset_request(self, *, rebuild_succeeded: bool):
+        """Remove one-shot reset state after its rebuild attempt finishes."""
+        if not self.entry.data.get(CONF_RESET_STATISTICS):
+            return
+        data = dict(self.entry.data)
+        previous_account = data.pop(CONF_RESET_ACCOUNT, None)
+        data.pop(CONF_RESET_STATISTICS, None)
+        if (
+            not rebuild_succeeded
+            and previous_account
+            and previous_account != data[CONF_ACCOUNT]
+        ):
+            data[CONF_ACCOUNT] = previous_account
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                data=data,
+                title=f"Energy Locals ({previous_account})",
+                unique_id=previous_account,
+            )
+            return
+        self.hass.config_entries.async_update_entry(self.entry, data=data)
 
     async def _get_db_total(self, statistic_id):
         try:
@@ -122,8 +160,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 if isinstance(start, datetime.datetime):
                     start = start.timestamp()
                 return record.get("sum"), start
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Unable to read statistic %s: %s", statistic_id, err)
+        except Exception as err:
+            raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
         return None, None
 
     def _extract_value(self, point):
@@ -168,7 +206,15 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             return self.data
 
         async with self._sync_lock:
-            return await self._perform_sync()
+            rebuild_succeeded = False
+            try:
+                result = await self._perform_sync()
+                rebuild_succeeded = True
+                return result
+            finally:
+                self._force_rebuild = False
+                if reset_requested:
+                    self._consume_reset_request(rebuild_succeeded=rebuild_succeeded)
 
     async def _perform_sync(self):
         conf = self.entry.data
@@ -178,17 +224,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         account_id = self.entry.data[CONF_ACCOUNT]
         id_e, id_c = self._statistic_ids(account_id)
         reset_requested = bool(conf.get(CONF_RESET_STATISTICS))
-
-        # A normal rebuild upserts regenerated rows in place. Only the explicit
-        # reset option clears statistics, because clearing first can destroy
-        # history if the upstream API no longer returns an older day.
-        if reset_requested:
-            if not self._statistics_clear_completed:
-                self._schedule_clear_imported_statistics(
-                    {account_id, conf.get(CONF_RESET_ACCOUNT)}
-                )
-                raise UpdateFailed("Clearing imported statistics before rebuild")
-            self._statistics_clear_completed = False
 
         # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
@@ -200,8 +235,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         today_syd = datetime.datetime.now(TZ_SYDNEY).date()
         current_tariff = tariff_for_date(tariffs, today_syd)
         price_kwh = current_tariff[CONF_PRICE_USAGE_DOLLARS]
-        price_daily = current_tariff[CONF_PRICE_SUPPLY_DOLLARS]
         is_rebuilding = self._force_rebuild or reset_requested
+        clear_before_import = reset_requested
 
         series_out_of_sync = statistic_series_out_of_sync(last_ts_e, last_ts_c)
         if series_out_of_sync and not is_rebuilding:
@@ -210,27 +245,20 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 "staging an automatic rebuild"
             )
             is_rebuilding = True
+            clear_before_import = True
 
-        # === CRITICAL: DETECT DATABASE CORRUPTION ===
-        if not is_rebuilding:
-            # Check 1: Zero Corruption (History exists but Total is 0)
-            if last_ts_e and g_kwh == 0.0:
+        # Detect database corruption without treating valid zero usage as corrupt.
+        if not is_rebuilding and last_ts_e:
+            last_dt_syd = datetime.datetime.fromtimestamp(
+                last_ts_e, tz=TZ_UTC
+            ).astimezone(TZ_SYDNEY)
+            if last_dt_syd.date() >= today_syd:
                 _LOGGER.warning(
-                    "Database corruption detected (Total=0). Forcing Auto-Rebuild."
+                    "Invalid future data detected (%s); forcing automatic rebuild",
+                    last_dt_syd.date(),
                 )
                 is_rebuilding = True
-
-            # Check 2: Time Travel Corruption (Data exists for Today/Future)
-            elif last_ts_e:
-                last_dt_syd = datetime.datetime.fromtimestamp(
-                    last_ts_e, tz=TZ_UTC
-                ).astimezone(TZ_SYDNEY)
-                if last_dt_syd.date() >= today_syd:
-                    _LOGGER.warning(
-                        "Invalid future data detected (%s); forcing automatic rebuild",
-                        last_dt_syd.date(),
-                    )
-                    is_rebuilding = True
+                clear_before_import = True
 
         # 2. DETERMINE START DATE
         if is_rebuilding:
@@ -247,14 +275,12 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         # 3. UP-TO-DATE CHECK
         if curr >= today_syd:
-            if g_kwh == 0.0:
-                raise UpdateFailed("No history found. Waiting for data...")
+            if clear_before_import:
+                raise UpdateFailed("No replacement history is available to import")
             return {
                 "total_kwh": g_kwh,
                 "total_cost": g_cost,
                 "price": price_kwh,
-                "supply_price": price_daily,
-                CONF_TARIFFS: tariffs,
                 "last_synced": dt_util.now(),
             }
 
@@ -274,9 +300,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     data = await self.hass.async_add_executor_job(
                         self.api.get_data, curr
                     )
-                    if isinstance(data, list) and len(data) > 0:
-                        usage_data = data
-                        break
+                    usage_data = data
+                    break
                 except EnergyLocalsAuthError as err:
                     raise ConfigEntryAuthFailed(
                         "Energy Locals credentials are no longer valid"
@@ -291,17 +316,17 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             within_grace = days_old <= _DATA_GRACE_DAYS
 
             if not usage_data:
-                if is_rebuilding:
-                    # Rebuild data is staged in memory until the entire date range
-                    # succeeds. Never overwrite later cumulative rows after a gap.
-                    raise self._rebuild_failed(
-                        f"Rebuild stopped: no usage data available for {curr}"
-                    )
                 if within_grace:
                     # Data not yet published — stop here so we don't skip this day
                     # and corrupt sums for all subsequent days. Retry next sync.
                     _LOGGER.debug("No data for %s yet, stopping sync.", curr)
                     break
+                if is_rebuilding and not reset_requested:
+                    # A non-destructive rebuild must not overwrite later cumulative
+                    # rows when an older contribution is no longer available.
+                    raise UpdateFailed(
+                        f"Rebuild stopped: no usage data available for {curr}"
+                    )
                 # Beyond grace period: genuine gap, advance past it.
                 _LOGGER.debug(
                     "No data for %s (beyond %d-day grace), skipping",
@@ -311,19 +336,21 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 curr += timedelta(days=1)
                 continue
 
-            if (within_grace or is_rebuilding) and not self._is_day_complete(
-                usage_data
-            ):
+            if not self._is_day_complete(usage_data):
                 # Partial day — API hasn't published through 23:30 yet.
                 # Stop here to avoid writing an incomplete sum that corrupts future days.
-                if is_rebuilding:
-                    raise self._rebuild_failed(
+                if within_grace:
+                    _LOGGER.debug(
+                        "Day %s incomplete (no 23:30 interval), stopping sync", curr
+                    )
+                    break
+                if is_rebuilding and not reset_requested:
+                    raise UpdateFailed(
                         f"Rebuild stopped: incomplete usage data for {curr}"
                     )
-                _LOGGER.debug(
-                    "Day %s incomplete (no 23:30 interval), stopping sync", curr
-                )
-                break
+                _LOGGER.debug("Skipping incomplete historical day %s", curr)
+                curr += timedelta(days=1)
+                continue
 
             buckets = {}
             day_tariff = tariff_for_date(tariffs, curr)
@@ -362,8 +389,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 buckets[t_utc]["cost"] += interval_usage_cost(val, day_tariff)
 
             if not buckets:
-                if is_rebuilding:
-                    raise self._rebuild_failed(
+                if is_rebuilding and not reset_requested:
+                    raise UpdateFailed(
                         f"Rebuild stopped: no valid usage intervals for {curr}"
                     )
                 curr += timedelta(days=1)
@@ -389,31 +416,26 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             curr += timedelta(days=1)
 
         # 5. FINAL SAFETY & DB WRITE
-        if db_kwh and g_kwh < db_kwh and not is_rebuilding:
-            _LOGGER.warning(
-                "Monotonic error (%s < %s); aborting database write to prevent "
-                "negative drops",
-                g_kwh,
-                db_kwh,
+        if clear_before_import and not st_e_all:
+            raise UpdateFailed("No replacement history is available to import")
+        if not st_e_all and last_ts_e is None:
+            raise UpdateFailed("No valid history found")
+
+        # Clear corrupt or explicitly reset series only after a replacement plan
+        # has been staged. Explicit resets may skip genuine older gaps; automatic
+        # repairs abort on those gaps and preserve the existing series.
+        if clear_before_import:
+            await self._async_clear_imported_statistics(
+                {account_id, conf.get(CONF_RESET_ACCOUNT)}
             )
-            return {
-                "total_kwh": db_kwh,
-                "total_cost": db_cost,
-                "price": price_kwh,
-                "last_synced": dt_util.now(),
-            }
 
         if st_e_all:
             async_add_external_statistics(
                 self.hass,
-                StatisticMetaData(
-                    has_mean=False,
-                    has_sum=True,
+                _statistic_metadata(
                     name=f"Energy Locals Usage ({account_id})",
-                    source=DOMAIN,
                     statistic_id=id_e,
-                    unit_of_measurement="kWh",
-                    mean_type=StatisticMeanType.NONE,
+                    unit="kWh",
                     unit_class="energy",
                 ),
                 st_e_all,
@@ -422,52 +444,18 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         if st_c_all:
             async_add_external_statistics(
                 self.hass,
-                StatisticMetaData(
-                    has_mean=False,
-                    has_sum=True,
+                _statistic_metadata(
                     name=f"Energy Locals Cost ({account_id})",
-                    source=DOMAIN,
                     statistic_id=id_c,
-                    unit_of_measurement="AUD",
-                    mean_type=StatisticMeanType.NONE,
+                    unit="AUD",
                     unit_class=None,
                 ),
                 st_c_all,
-            )
-
-        if g_kwh == 0.0:
-            if db_kwh and db_kwh > 0:
-                _LOGGER.warning(
-                    "Sync resulted in 0.0; falling back to the last valid database "
-                    "value: %s",
-                    db_kwh,
-                )
-                return {
-                    "total_kwh": db_kwh,
-                    "total_cost": db_cost,
-                    "price": price_kwh,
-                    "last_synced": dt_util.now(),
-                }
-            raise UpdateFailed("No valid history found.")
-
-        if self._force_rebuild:
-            self._force_rebuild = False
-
-        if reset_requested:
-            self.hass.config_entries.async_update_entry(
-                self.entry,
-                data={
-                    **self.entry.data,
-                    CONF_RESET_STATISTICS: False,
-                    CONF_RESET_ACCOUNT: None,
-                },
             )
 
         return {
             "total_kwh": g_kwh,
             "total_cost": g_cost,
             "price": price_kwh,
-            "supply_price": price_daily,
-            CONF_TARIFFS: tariffs,
             "last_synced": dt_util.now(),
         }

@@ -83,7 +83,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
             with self.assertRaises(EnergyLocalsAPIError):
                 self.api.get_data(self.day)
 
-            self.assertEqual(post.call_count, 2)
+            self.assertEqual(post.call_count, 1)
 
     def test_valid_empty_usage_response_remains_empty(self):
         with patch.object(requests, "post") as post:
@@ -94,6 +94,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
             post.return_value = response
 
             self.assertEqual(self.api.get_data(self.day), [])
+            post.assert_called_once()
 
     def test_invalid_usage_shape_is_an_api_failure(self):
         with patch.object(requests, "post") as post:

@@ -88,62 +88,58 @@ class EnergyLocalsAPI:
             "intervalMode": "INTERVAL",
         }
 
-        for attempt in range(2):
-            try:
+        try:
+            resp = requests.post(
+                url, json=payload, headers=self._get_headers(), timeout=30
+            )
+
+            if resp.status_code == 401:
+                self._token = None
+                _LOGGER.info("Energy Locals token expired; authenticating again")
+                self.login()
                 resp = requests.post(
                     url, json=payload, headers=self._get_headers(), timeout=30
                 )
-
                 if resp.status_code == 401:
-                    self._token = None
-                    if attempt == 1:
-                        raise EnergyLocalsAuthError(
-                            "Energy Locals rejected the refreshed credentials"
-                        )
-                    _LOGGER.info("Energy Locals token expired; authenticating again")
-                    self.login()
-                    continue
-                if resp.status_code == 403:
-                    raise EnergyLocalsAccountError(
-                        "Energy Locals denied access to the utility account"
+                    raise EnergyLocalsAuthError(
+                        "Energy Locals rejected the refreshed credentials"
                     )
+            if resp.status_code == 403:
+                raise EnergyLocalsAccountError(
+                    "Energy Locals denied access to the utility account"
+                )
 
-                resp.raise_for_status()
-                data = resp.json()
+            resp.raise_for_status()
+            data = resp.json()
 
-                if not isinstance(data, dict) or not isinstance(
-                    data.get("datasets"), list
-                ):
-                    raise EnergyLocalsAPIError(
-                        "Energy Locals returned an invalid usage response"
-                    )
-                if not data["datasets"]:
-                    return []
+            if not isinstance(data, dict) or not isinstance(data.get("datasets"), list):
+                raise EnergyLocalsAPIError(
+                    "Energy Locals returned an invalid usage response"
+                )
+            if not data["datasets"]:
+                return []
 
-                dataset = data["datasets"][0]
-                if not isinstance(dataset, dict) or "data" not in dataset:
-                    raise EnergyLocalsAPIError(
-                        "Energy Locals returned invalid dataset data"
-                    )
-                usage_data = dataset["data"]
-                if not isinstance(usage_data, list):
-                    raise EnergyLocalsAPIError(
-                        "Energy Locals returned invalid interval data"
-                    )
-                return usage_data
+            dataset = data["datasets"][0]
+            if not isinstance(dataset, dict) or "data" not in dataset:
+                raise EnergyLocalsAPIError(
+                    "Energy Locals returned invalid dataset data"
+                )
+            usage_data = dataset["data"]
+            if not isinstance(usage_data, list):
+                raise EnergyLocalsAPIError(
+                    "Energy Locals returned invalid interval data"
+                )
+            return usage_data
 
-            except (EnergyLocalsAccountError, EnergyLocalsAuthError):
-                raise
-            except EnergyLocalsAPIError:
-                raise
-            except (
-                requests.exceptions.HTTPError,
-                requests.exceptions.JSONDecodeError,
-                requests.exceptions.RequestException,
-            ) as err:
-                if attempt == 1:
-                    raise EnergyLocalsAPIError(
-                        f"Unable to fetch Energy Locals data for {date_str}"
-                    ) from err
-
-        raise EnergyLocalsAPIError(f"Unable to fetch Energy Locals data for {date_str}")
+        except (EnergyLocalsAccountError, EnergyLocalsAuthError):
+            raise
+        except EnergyLocalsAPIError:
+            raise
+        except (
+            requests.exceptions.HTTPError,
+            requests.exceptions.JSONDecodeError,
+            requests.exceptions.RequestException,
+        ) as err:
+            raise EnergyLocalsAPIError(
+                f"Unable to fetch Energy Locals data for {date_str}"
+            ) from err

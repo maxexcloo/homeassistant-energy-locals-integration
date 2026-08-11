@@ -1,10 +1,9 @@
 """Button platform for the Energy Locals integration."""
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .entity import EnergyLocalsEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -12,25 +11,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([EnergyLocalsSyncButton(coordinator, entry)])
 
 
-class EnergyLocalsSyncButton(CoordinatorEntity, ButtonEntity):
-    _attr_has_entity_name = True
+class EnergyLocalsSyncButton(EnergyLocalsEntity, ButtonEntity):
     _attr_icon = "mdi:database-refresh"
     _attr_suggested_object_id = "force_rebuild"
     _attr_translation_key = "rebuild_statistics"
 
     def __init__(self, coordinator, entry):
-        super().__init__(coordinator)
-        self._entry = entry
+        """Initialise the statistics rebuild button."""
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_force_rebuild"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name="Energy Locals",
-            manufacturer="Energy Locals",
-            model="Utility Meter",
-        )
 
     async def async_press(self) -> None:
         await self.coordinator.async_force_sync()

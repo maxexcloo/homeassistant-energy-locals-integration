@@ -4,7 +4,7 @@ Imports interval usage data from [Energy Locals Urban](https://urban.energylocal
 
 ## Features
 
-- Automatic corruption detection and self-healing rebuild
+- Automatic inconsistency detection and safe rebuilds
 - Half-hourly interval data imported as hourly long-term statistics
 - Manual non-destructive statistics rebuild button
 - Supports multiple accounts
@@ -58,7 +58,11 @@ was active on each usage day, so later price changes do not alter earlier costs.
 Entering the same effective date again replaces that tariff period. Leave the
 effective-date field blank to keep the tariff schedule unchanged. If adding or
 correcting a tariff that is already in effect, press **Rebuild Statistics**
-afterward to recalculate the affected historical cost.
+afterwards to recalculate the affected historical cost.
+
+Changing the utility account validates and rebuilds the new account, then removes
+statistics belonging to the old account. If replacement history cannot be staged,
+the account change is reverted and the old statistics remain untouched.
 
 ## Entities
 

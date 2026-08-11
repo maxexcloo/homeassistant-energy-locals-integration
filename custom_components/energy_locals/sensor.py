@@ -1,85 +1,81 @@
 """Sensor platform for the Energy Locals integration."""
 
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
+    SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .entity import EnergyLocalsEntity
+
+
+@dataclass(frozen=True, kw_only=True)
+class EnergyLocalsSensorEntityDescription(SensorEntityDescription):
+    """Describe an Energy Locals sensor."""
+
+    value_fn: Callable[[dict], Any]
+
+
+SENSORS = (
+    EnergyLocalsSensorEntityDescription(
+        key="cost",
+        translation_key="cost",
+        device_class=SensorDeviceClass.MONETARY,
+        native_unit_of_measurement="AUD",
+        value_fn=lambda data: (
+            round(data["total_cost"], 2) if data.get("total_cost") is not None else None
+        ),
+    ),
+    EnergyLocalsSensorEntityDescription(
+        key="last_synced",
+        translation_key="last_synced",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda data: data.get("last_synced"),
+    ),
+    EnergyLocalsSensorEntityDescription(
+        key="price",
+        translation_key="usage_price",
+        native_unit_of_measurement="$/kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get("price"),
+    ),
+    EnergyLocalsSensorEntityDescription(
+        key="usage",
+        translation_key="usage",
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement="kWh",
+        value_fn=lambda data: data.get("total_kwh"),
+    ),
+)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        [
-            EnergyLocalsSensor(coordinator, entry, "usage"),
-            EnergyLocalsSensor(coordinator, entry, "cost"),
-            EnergyLocalsSensor(coordinator, entry, "price"),
-            EnergyLocalsSensor(coordinator, entry, "last_synced"),
-        ]
+        EnergyLocalsSensor(coordinator, entry, description) for description in SENSORS
     )
 
 
-class EnergyLocalsSensor(CoordinatorEntity, SensorEntity):
-    _attr_has_entity_name = True
+class EnergyLocalsSensor(EnergyLocalsEntity, SensorEntity):
+    """Representation of an Energy Locals sensor."""
 
-    def __init__(self, coordinator, entry, sens_type):
-        super().__init__(coordinator)
-        self._entry = entry
-        self._type = sens_type
+    entity_description: EnergyLocalsSensorEntityDescription
 
-        if sens_type == "usage":
-            self._attr_unique_id = f"{entry.entry_id}_usage"
-            self._attr_translation_key = "usage"
-            self._attr_device_class = SensorDeviceClass.ENERGY
-            self._attr_native_unit_of_measurement = "kWh"
-
-        elif sens_type == "cost":
-            self._attr_unique_id = f"{entry.entry_id}_cost"
-            self._attr_translation_key = "cost"
-            self._attr_device_class = SensorDeviceClass.MONETARY
-            self._attr_native_unit_of_measurement = "AUD"
-
-        elif sens_type == "price":
-            self._attr_unique_id = f"{entry.entry_id}_price"
-            self._attr_translation_key = "usage_price"
-            self._attr_device_class = None
-            self._attr_native_unit_of_measurement = "$/kWh"
-            self._attr_state_class = SensorStateClass.MEASUREMENT
-
-        elif sens_type == "last_synced":
-            self._attr_unique_id = f"{entry.entry_id}_last_synced"
-            self._attr_translation_key = "last_synced"
-            self._attr_device_class = SensorDeviceClass.TIMESTAMP
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name="Energy Locals",
-            manufacturer="Energy Locals",
-            model="Utility Meter",
-        )
+    def __init__(self, coordinator, entry, description):
+        """Initialise an Energy Locals sensor."""
+        super().__init__(coordinator, entry)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
 
     @property
     def native_value(self):
         if not self.coordinator.data:
             return None
 
-        if self._type == "usage":
-            return self.coordinator.data.get("total_kwh")
-
-        elif self._type == "cost":
-            val = self.coordinator.data.get("total_cost")
-            return round(val, 2) if val is not None else None
-
-        elif self._type == "price":
-            return self.coordinator.data.get("price")
-
-        elif self._type == "last_synced":
-            return self.coordinator.data.get("last_synced")
-
-        return None
+        return self.entity_description.value_fn(self.coordinator.data)
