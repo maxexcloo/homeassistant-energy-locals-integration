@@ -49,7 +49,7 @@ from .tariffs import (
 _LOGGER = logging.getLogger(__name__)
 
 TZ_SYDNEY = ZoneInfo("Australia/Sydney")
-TZ_UTC = datetime.timezone.utc
+TZ_UTC = datetime.UTC
 
 # Days within which we require a complete day (23:30 present) before importing.
 # Beyond this, whatever the API has is treated as final (handles genuine data gaps).
@@ -169,7 +169,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             if key in point:
                 try:
                     value = float(point[key])
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     continue
                 if math.isfinite(value):
                     return max(0.0, value)
@@ -185,7 +185,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 dt_local = dt.astimezone(TZ_SYDNEY)
                 if dt_local.hour == 23 and dt_local.minute == 30:
                     return True
-            except (KeyError, ValueError, TypeError):
+            except KeyError, ValueError, TypeError:
                 continue
         return False
 
@@ -358,7 +358,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             for p in usage_data:
                 try:
                     dt_p = datetime.datetime.fromisoformat(p["dateValue"])
-                except (KeyError, ValueError, TypeError):
+                except KeyError, ValueError, TypeError:
                     _LOGGER.debug("Skipping malformed data point: %s", p)
                     continue
 

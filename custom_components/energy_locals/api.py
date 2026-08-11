@@ -131,7 +131,7 @@ class EnergyLocalsAPI:
                 )
             return usage_data
 
-        except (EnergyLocalsAccountError, EnergyLocalsAuthError):
+        except EnergyLocalsAccountError, EnergyLocalsAuthError:
             raise
         except EnergyLocalsAPIError:
             raise

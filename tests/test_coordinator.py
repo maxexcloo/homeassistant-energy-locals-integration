@@ -65,7 +65,7 @@ core_module.HomeAssistant = object
 exceptions_module.ConfigEntryAuthFailed = _ConfigEntryAuthFailed
 coordinator_module.DataUpdateCoordinator = _DataUpdateCoordinator
 coordinator_module.UpdateFailed = _UpdateFailed
-dt_module.now = lambda: datetime.datetime.now(datetime.timezone.utc)
+dt_module.now = lambda: datetime.datetime.now(datetime.UTC)
 
 sys.modules[models_module.__name__] = models_module
 sys.modules[recorder_statistics_module.__name__] = recorder_statistics_module
