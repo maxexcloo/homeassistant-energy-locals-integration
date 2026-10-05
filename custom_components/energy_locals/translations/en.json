@@ -24,7 +24,7 @@
     },
     "error": {
       "already_configured": "This Energy Locals utility account is already configured.",
-      "cannot_connect": "Failed to connect. Check credentials.",
+      "cannot_connect": "Failed to connect to Energy Locals. Try again later.",
       "invalid_account": "The utility account could not be accessed with these credentials.",
       "invalid_auth": "Invalid authentication.",
       "start_date_before_tariff": "The import start date must be on or after the first configured tariff.",
@@ -58,6 +58,14 @@
     }
   },
   "options": {
+    "error": {
+      "already_configured": "This Energy Locals utility account is already configured.",
+      "cannot_connect": "Failed to connect to Energy Locals. Try again later.",
+      "invalid_account": "The utility account could not be accessed with these credentials.",
+      "invalid_auth": "Invalid authentication.",
+      "start_date_before_tariff": "The import start date must be on or after the first configured tariff.",
+      "start_date_future": "The import start date cannot be in the future."
+    },
     "step": {
       "init": {
         "title": "Update Energy Locals",

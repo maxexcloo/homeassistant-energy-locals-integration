@@ -2,28 +2,6 @@
 
 Imports interval usage data from [Energy Locals Urban](https://urban.energylocals.com.au/) into Home Assistant's long-term statistics, enabling the Energy Dashboard to display historical electricity consumption and cost.
 
-## Features
-
-- Automatic inconsistency detection and safe rebuilds
-- Half-hourly interval data imported as hourly long-term statistics
-- Manual non-destructive statistics rebuild button
-- Supports multiple accounts
-- Tracks cumulative kWh usage and cost (with configurable daily supply charge)
-
-## Installation
-
-### HACS (recommended)
-
-1. Open HACS in Home Assistant
-2. Go to **Integrations** → **⋮** → **Custom repositories**
-3. Add `https://github.com/maxexcloo/homeassistant-energy-locals-integration` with category **Integration**
-4. Search for **Energy Locals** and install
-5. Restart Home Assistant
-
-### Manual
-
-Copy the `custom_components/energy_locals/` folder into your HA `config/custom_components/` directory and restart.
-
 ## Configuration
 
 Go to **Settings → Devices & Services → Add Integration** and search for **Energy Locals**.
@@ -39,6 +17,21 @@ Go to **Settings → Devices & Services → Add Integration** and search for **E
 
 To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network, and look for a request to `/utility-accounts/{id}/usage-chart`.
 
+## Development
+
+Use Python **3.14.8 or newer** and the Ruff version pinned in `pyproject.toml`.
+Run the checks from the repository root:
+
+```sh
+ruff check .
+ruff format --check .
+python3 -m unittest discover -s tests
+```
+
+Unit tests use stand-ins for Home Assistant and do not contact Energy Locals.
+GitHub Actions also runs HACS and hassfest validation. A live Home Assistant
+installation is needed to verify configuration flows and recorder imports end to end.
+
 ## Energy Dashboard Setup
 
 Because this integration imports statistics directly (not via sensor state changes), you need to add them manually to the Energy Dashboard:
@@ -47,6 +40,44 @@ Because this integration imports statistics directly (not via sensor state chang
 2. Under **Electricity grid → Grid consumption**, click **Add consumption**
 3. Select **Use a statistic** and search for `Energy Locals Usage`
 4. Optionally add `Energy Locals Cost` under cost tracking
+
+## Entities
+
+| Entity                               | Description                                  |
+| ------------------------------------ | -------------------------------------------- |
+| `button.energy_locals_force_rebuild` | Recalculate and upsert all available history |
+| `sensor.energy_locals_cost`          | Cumulative cost in AUD                       |
+| `sensor.energy_locals_last_synced`   | Timestamp of last successful sync            |
+| `sensor.energy_locals_usage`         | Cumulative kWh total                         |
+| `sensor.energy_locals_usage_price`   | Configured rate ($/kWh)                      |
+
+## Features
+
+- Automatic inconsistency detection and safe rebuilds
+- Half-hourly interval data imported as hourly long-term statistics
+- Manual non-destructive statistics rebuild button that preserves existing history if replacement data is incomplete
+- Supports multiple accounts
+- Tracks cumulative kWh usage and cost (with configurable daily supply charge)
+
+## Installation
+
+Requires Home Assistant **2026.9.4 or newer**.
+
+### HACS (recommended)
+
+1. Open HACS in Home Assistant
+2. Go to **Integrations** → **⋮** → **Custom repositories**
+3. Add `https://github.com/maxexcloo/homeassistant-energy-locals-integration` with category **Integration**
+4. Search for **Energy Locals** and install
+5. Restart Home Assistant
+
+### Manual
+
+Copy the `custom_components/energy_locals/` folder into your HA `config/custom_components/` directory and restart.
+
+## Licence
+
+AGPL-3.0 - see [LICENSE](LICENSE).
 
 ## Updating Prices
 
@@ -63,17 +94,3 @@ afterwards to recalculate the affected historical cost.
 Changing the utility account validates and rebuilds the new account, then removes
 statistics belonging to the old account. If replacement history cannot be staged,
 the account change is reverted and the old statistics remain untouched.
-
-## Entities
-
-| Entity                               | Description                                  |
-| ------------------------------------ | -------------------------------------------- |
-| `button.energy_locals_force_rebuild` | Recalculate and upsert all available history |
-| `sensor.energy_locals_cost`          | Cumulative cost in AUD                       |
-| `sensor.energy_locals_last_synced`   | Timestamp of last successful sync            |
-| `sensor.energy_locals_usage`         | Cumulative kWh total                         |
-| `sensor.energy_locals_usage_price`   | Configured rate ($/kWh)                      |
-
-## Licence
-
-AGPL-3.0 - see [LICENSE](LICENSE).

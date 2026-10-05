@@ -55,7 +55,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return EnergyLocalsOptionsFlow(config_entry)
+        return EnergyLocalsOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         """Handle the initial setup."""
@@ -166,8 +166,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self, config_entry):
-        self._config_entry = config_entry
+    """Manage account settings and effective-dated tariffs."""
 
     async def async_step_init(self, user_input=None):
         errors = {}
@@ -178,7 +177,7 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
             effective_date = user_input.pop(CONF_TARIFF_EFFECTIVE_DATE, "")
             usage_price = user_input.pop(CONF_PRICE_USAGE_DOLLARS)
             supply_price = user_input.pop(CONF_PRICE_SUPPLY_DOLLARS)
-            tariffs = normalise_tariffs(self._config_entry.data)
+            tariffs = normalise_tariffs(self.config_entry.data)
             if effective_date:
                 tariffs = upsert_tariff(
                     tariffs, effective_date, usage_price, supply_price
@@ -186,18 +185,18 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
 
             account_id = user_input[CONF_ACCOUNT]
             duplicate = any(
-                entry.entry_id != self._config_entry.entry_id
+                entry.entry_id != self.config_entry.entry_id
                 and entry.data.get(CONF_ACCOUNT) == account_id
                 for entry in self.hass.config_entries.async_entries(DOMAIN)
             )
             if duplicate:
                 errors["base"] = "already_configured"
 
-            account_changed = account_id != self._config_entry.data.get(CONF_ACCOUNT)
+            account_changed = account_id != self.config_entry.data.get(CONF_ACCOUNT)
             if account_changed and not duplicate:
                 api = EnergyLocalsAPI(
-                    self._config_entry.data[CONF_USERNAME],
-                    self._config_entry.data[CONF_PASSWORD],
+                    self.config_entry.data[CONF_USERNAME],
+                    self.config_entry.data[CONF_PASSWORD],
                     account_id,
                 )
                 try:
@@ -232,7 +231,7 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                 tariffs, datetime.datetime.now(TZ_SYDNEY).date()
             )
             new_data = {
-                **self._config_entry.data,
+                **self.config_entry.data,
                 **user_input,
                 CONF_TARIFFS: tariffs,
                 # Retain these keys for backwards compatibility with older releases.
@@ -241,16 +240,16 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
             }
             if account_changed or user_input.get(CONF_RESET_STATISTICS):
                 new_data[CONF_RESET_STATISTICS] = True
-                new_data[CONF_RESET_ACCOUNT] = self._config_entry.data.get(CONF_ACCOUNT)
+                new_data[CONF_RESET_ACCOUNT] = self.config_entry.data.get(CONF_ACCOUNT)
             self.hass.config_entries.async_update_entry(
-                self._config_entry,
+                self.config_entry,
                 data=new_data,
                 title=title,
                 unique_id=account_id,
             )
             return self.async_create_entry(title="", data={})
 
-        data = self._config_entry.data
+        data = self.config_entry.data
         tariffs = normalise_tariffs(data)
         return self._show_options_form(data, tariffs, errors)
 
@@ -259,6 +258,7 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
         current_tariff = tariff_for_date(
             tariffs, datetime.datetime.now(TZ_SYDNEY).date()
         )
+        prices = data if errors else current_tariff
         schedule = "\n".join(
             (
                 f"{item[TARIFF_EFFECTIVE_FROM]}: "
@@ -283,11 +283,11 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
                 ): DateSelector(),
                 vol.Required(
                     CONF_PRICE_USAGE_DOLLARS,
-                    default=current_tariff[CONF_PRICE_USAGE_DOLLARS],
+                    default=prices[CONF_PRICE_USAGE_DOLLARS],
                 ): _finite_non_negative_price,
                 vol.Required(
                     CONF_PRICE_SUPPLY_DOLLARS,
-                    default=current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
+                    default=prices[CONF_PRICE_SUPPLY_DOLLARS],
                 ): _finite_non_negative_price,
                 effective_date_field: DateSelector(),
                 vol.Optional(

@@ -10,9 +10,12 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
-from homeassistant.components.recorder.models import StatisticData
-from homeassistant.components.recorder.statistics import (
+from homeassistant.components.recorder.models import (
+    StatisticData,
+    StatisticMeanType,
     StatisticMetaData,
+)
+from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
 )
@@ -21,13 +24,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-
-try:
-    from homeassistant.components.recorder.models import StatisticMeanType
-except ImportError:  # Home Assistant before 2025.11
-    _STATISTIC_MEAN_NONE = None
-else:
-    _STATISTIC_MEAN_NONE = StatisticMeanType.NONE
 
 from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
@@ -59,19 +55,16 @@ _DATA_GRACE_DAYS = 3
 def _statistic_metadata(
     *, name: str, statistic_id: str, unit: str, unit_class: str | None
 ) -> StatisticMetaData:
-    """Build recorder metadata compatible with supported Home Assistant versions."""
-    metadata = {
-        "has_mean": False,
-        "has_sum": True,
-        "name": name,
-        "source": DOMAIN,
-        "statistic_id": statistic_id,
-        "unit_of_measurement": unit,
-    }
-    if _STATISTIC_MEAN_NONE is not None:
-        metadata["mean_type"] = _STATISTIC_MEAN_NONE
-        metadata["unit_class"] = unit_class
-    return StatisticMetaData(**metadata)
+    """Build recorder metadata for external cumulative statistics."""
+    return StatisticMetaData(
+        has_sum=True,
+        mean_type=StatisticMeanType.NONE,
+        name=name,
+        source=DOMAIN,
+        statistic_id=statistic_id,
+        unit_class=unit_class,
+        unit_of_measurement=unit,
+    )
 
 
 class EnergyLocalsCoordinator(DataUpdateCoordinator):
@@ -175,7 +168,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     return max(0.0, value)
         raise ValueError("Usage interval did not contain a finite numeric value")
 
-    def _is_day_complete(self, usage_data: list) -> bool:
+    def _is_day_complete(self, usage_data: list, day: datetime.date) -> bool:
         """Return True if the 23:30 interval is present, meaning the full day is published."""
         for p in usage_data:
             try:
@@ -183,7 +176,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 if not dt.tzinfo:
                     dt = dt.replace(tzinfo=TZ_SYDNEY, fold=1)
                 dt_local = dt.astimezone(TZ_SYDNEY)
-                if dt_local.hour == 23 and dt_local.minute == 30:
+                if (
+                    dt_local.date() == day
+                    and dt_local.hour == 23
+                    and dt_local.minute == 30
+                ):
                     return True
             except KeyError, ValueError, TypeError:
                 continue
@@ -336,7 +333,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 curr += timedelta(days=1)
                 continue
 
-            if not self._is_day_complete(usage_data):
+            if not self._is_day_complete(usage_data, curr):
                 # Partial day — API hasn't published through 23:30 yet.
                 # Stop here to avoid writing an incomplete sum that corrupts future days.
                 if within_grace:
@@ -420,6 +417,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("No replacement history is available to import")
         if not st_e_all and last_ts_e is None:
             raise UpdateFailed("No valid history found")
+
+        if is_rebuilding and not clear_before_import:
+            last_existing = max(last_ts_e or 0, last_ts_c or 0)
+            if not st_e_all or st_e_all[-1]["start"].timestamp() < last_existing:
+                raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
 
         # Clear corrupt or explicitly reset series only after a replacement plan
         # has been staged. Explicit resets may skip genuine older gaps; automatic

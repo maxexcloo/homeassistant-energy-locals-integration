@@ -131,10 +131,6 @@ class EnergyLocalsAPI:
                 )
             return usage_data
 
-        except EnergyLocalsAccountError, EnergyLocalsAuthError:
-            raise
-        except EnergyLocalsAPIError:
-            raise
         except (
             requests.exceptions.HTTPError,
             requests.exceptions.JSONDecodeError,
