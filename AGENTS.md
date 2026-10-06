@@ -27,4 +27,4 @@
 
 ## Verification
 
-- Run `python3 -m unittest discover -s tests` for Python changes.
+- Run `mise run check` before handoff.

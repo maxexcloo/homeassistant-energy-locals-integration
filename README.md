@@ -19,13 +19,11 @@ To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https
 
 ## Development
 
-Use Python **3.14.8 or newer** and the Ruff version pinned in `pyproject.toml`.
+Run `mise run setup` to install the pinned development tools.
 Run the checks from the repository root:
 
 ```sh
-ruff check .
-ruff format --check .
-python3 -m unittest discover -s tests
+mise run check
 ```
 
 Unit tests use stand-ins for Home Assistant and do not contact Energy Locals.
