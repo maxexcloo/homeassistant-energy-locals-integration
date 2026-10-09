@@ -12,7 +12,7 @@ Go to **Settings → Devices & Services → Add Integration** and search for **E
 | Password            | Your Energy Locals MyAccount password            |
 | Utility Account ID  | Found in your account portal (e.g. `404297`)     |
 | Import Start Date   | Earliest date to import data from (`YYYY-MM-DD`) |
-| Price per kWh       | Your usage rate in AUD (e.g. `0.359`)            |
+| Price Per kWh       | Your usage rate in AUD (e.g. `0.359`)            |
 | Daily Supply Charge | Daily fixed charge in AUD (e.g. `0.94`)          |
 
 To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network, and look for a request to `/utility-accounts/{id}/usage-chart`.
@@ -35,8 +35,8 @@ installation is needed to verify configuration flows and recorder imports end to
 Because this integration imports statistics directly (not via sensor state changes), you need to add them manually to the Energy Dashboard:
 
 1. Go to **Settings → Dashboards → Energy**
-2. Under **Electricity grid → Grid consumption**, click **Add consumption**
-3. Select **Use a statistic** and search for `Energy Locals Usage`
+2. Under **Electricity Grid → Grid Consumption**, click **Add Consumption**
+3. Select **Use a Statistic** and search for `Energy Locals Usage`
 4. Optionally add `Energy Locals Cost` under cost tracking
 
 ## Entities

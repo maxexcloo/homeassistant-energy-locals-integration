@@ -30,7 +30,7 @@
           "password": "Password",
           "account_id": "Utility Account ID",
           "start_date": "Import Start Date (YYYY-MM-DD)",
-          "usage_price_dollars": "Price per kWh ($)",
+          "usage_price_dollars": "Price Per kWh ($)",
           "supply_price_dollars": "Daily Supply Charge ($)"
         }
       }
@@ -72,7 +72,7 @@
         "data": {
           "account_id": "Utility Account ID",
           "start_date": "Import Start Date (YYYY-MM-DD)",
-          "usage_price_dollars": "Tariff Price per kWh ($)",
+          "usage_price_dollars": "Tariff Price Per kWh ($)",
           "supply_price_dollars": "Tariff Daily Supply Charge ($)",
           "tariff_effective_date": "Add or Replace Tariff Effective From (YYYY-MM-DD)",
           "reset_statistics": "Clear Imported Statistics & Rebuild Now"
