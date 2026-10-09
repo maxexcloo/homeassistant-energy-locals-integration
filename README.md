@@ -61,7 +61,7 @@ Because this integration imports statistics directly (not via sensor state chang
 
 Requires Home Assistant **2026.9.4 or newer**.
 
-### HACS (recommended)
+### HACS (Recommended)
 
 1. Open HACS in Home Assistant
 2. Go to **Integrations** → **⋮** → **Custom repositories**

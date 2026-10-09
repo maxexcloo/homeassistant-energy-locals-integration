@@ -275,10 +275,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             if clear_before_import:
                 raise UpdateFailed("No replacement history is available to import")
             return {
-                "total_kwh": g_kwh,
-                "total_cost": g_cost,
-                "price": price_kwh,
                 "last_synced": dt_util.now(),
+                "price": price_kwh,
+                "total_cost": g_cost,
+                "total_kwh": g_kwh,
             }
 
         _LOGGER.info("Syncing Energy Locals statistics from %s", curr)
@@ -370,7 +370,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 )
 
                 if t_utc not in buckets:
-                    buckets[t_utc] = {"kwh": 0.0, "cost": 0.0}
+                    buckets[t_utc] = {"cost": 0.0, "kwh": 0.0}
 
                 try:
                     val = self._extract_value(p)
@@ -456,8 +456,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             )
 
         return {
-            "total_kwh": g_kwh,
-            "total_cost": g_cost,
-            "price": price_kwh,
             "last_synced": dt_util.now(),
+            "price": price_kwh,
+            "total_cost": g_cost,
+            "total_kwh": g_kwh,
         }

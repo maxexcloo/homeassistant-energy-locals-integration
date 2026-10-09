@@ -46,7 +46,7 @@ class EnergyLocalsAPI:
     def login(self):
         """Authenticate and store the token."""
         try:
-            payload = {"username": self._username, "password": self._password}
+            payload = {"password": self._password, "username": self._username}
             headers = self._get_headers()
             headers.pop("Authorization", None)
 
@@ -83,9 +83,9 @@ class EnergyLocalsAPI:
         url = DATA_URL_TEMPLATE.format(self._account_id)
 
         payload = {
-            "startDate": date_str,
             "endDate": date_str,
             "intervalMode": "INTERVAL",
+            "startDate": date_str,
         }
 
         try:
