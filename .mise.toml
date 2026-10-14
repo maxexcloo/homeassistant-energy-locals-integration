@@ -1,10 +1,13 @@
 [tools]
+# gh = "latest"
+# python = "latest"
+# ruff = "latest"
+# updatecli = "latest"
 python = "3.15.0"
 ruff = "0.17.0"
 updatecli = "0.122.1"
 
 # Dependency Updates
-
 [tasks."dependencies:check"]
 description = "Preview Local Dependency Updates"
 run = """
@@ -27,7 +30,6 @@ updatecli pipeline apply --config .updatecli.d --disable-changelog --disable-uda
 """
 
 # Development
-
 [tasks.check]
 description = "Run All Local Checks"
 run = """
@@ -43,9 +45,3 @@ run = """
 ruff check --fix --select I .
 ruff format .
 """
-
-# Setup
-
-[tasks.setup]
-description = "Install Development Tools"
-run = "mise install"
