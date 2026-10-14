@@ -25,22 +25,3 @@ targets:
       searchpattern: true
       files:
         - .github/workflows/*.y*ml
----
-name: Update Mise Tools
-pipelineid: update-mise-tools
-labels:
-  group: tools
-targets:
-  tools:
-    disablesourceinput: true
-    kind: shell
-    spec:
-      command: |
-        updates=$(mise outdated --bump --json --local) || exit "$?"
-        if [ "$updates" = "{}" ]; then
-          exit 0
-        fi
-        if [ "$DRY_RUN" = false ]; then
-          mise upgrade --bump --local --no-prune || exit "$?"
-        fi
-        printf '%s\n' "$updates"

@@ -19,7 +19,7 @@ To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https
 
 ## Development
 
-Run `mise install` to install the pinned development tools.
+Run `mise install` to install your configured development tools.
 Run the checks from the repository root:
 
 ```sh
