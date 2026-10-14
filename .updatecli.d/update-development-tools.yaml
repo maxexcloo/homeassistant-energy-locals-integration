@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://www.updatecli.io/schema/latest/policy/manifest/config.json
+name: Update Development Tools
+pipelineid: update-development-tools
+labels:
+  group: tools
+sources:
+  python:
+    kind: shell
+    spec:
+      command: mise latest python
+  ruff:
+    kind: shell
+    spec:
+      command: mise latest ruff
+  updatecli:
+    kind: shell
+    spec:
+      command: mise latest updatecli
+targets:
+  python:
+    kind: file
+    sourceid: python
+    spec:
+      file: .mise.toml
+      matchpattern: (?m)^(python = ")[^"]+(")$
+      replacepattern: ${1}{{ source "python" }}${2}
+  ruff:
+    kind: file
+    sourceid: ruff
+    spec:
+      file: .mise.toml
+      matchpattern: (?m)^(ruff = ")[^"]+(")$
+      replacepattern: ${1}{{ source "ruff" }}${2}
+  updatecli:
+    kind: file
+    sourceid: updatecli
+    spec:
+      file: .mise.toml
+      matchpattern: (?m)^(updatecli = ")[^"]+(")$
+      replacepattern: ${1}{{ source "updatecli" }}${2}

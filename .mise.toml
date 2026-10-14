@@ -1,10 +1,12 @@
 [tools]
 python = "3.15.0"
 ruff = "0.17.0"
+updatecli = "0.122.1"
 
 [tasks.check]
 description = "Run All Local Checks"
 run = """
+updatecli manifest validate --config .updatecli.d --disable-templating --strict
 ruff check .
 ruff format --check .
 python -m unittest discover -s tests
@@ -20,3 +22,25 @@ ruff format .
 [tasks.setup]
 description = "Install Development Tools"
 run = "mise install"
+
+# Dependency Updates
+[tasks."dependencies:check"]
+description = "Preview Local Dependency Updates"
+run = """
+GITHUB_TOKEN="$(gh auth token)"
+export GITHUB_TOKEN
+updatecli pipeline diff --config .updatecli.d --disable-changelog --disable-udash-report --unique-tmp-dir
+"""
+
+[tasks."dependencies:update"]
+description = "Apply Reviewed Local Dependency Updates"
+usage = 'flag "--labels <labels>" help="Select Updatecli groups, such as group:tools"'
+run = """
+GITHUB_TOKEN="$(gh auth token)"
+export GITHUB_TOKEN
+set --
+if [ -n "${usage_labels:-}" ]; then
+  set -- --labels "$usage_labels"
+fi
+updatecli pipeline apply --config .updatecli.d --disable-changelog --disable-udash-report --unique-tmp-dir "$@"
+"""
