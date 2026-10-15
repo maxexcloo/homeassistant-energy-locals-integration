@@ -27,8 +27,7 @@ mise run check
 ```
 
 Unit tests use stand-ins for Home Assistant and do not contact Energy Locals.
-GitHub Actions also runs HACS and hassfest validation. A live Home Assistant
-installation is needed to verify configuration flows and recorder imports end to end.
+A live Home Assistant installation is needed to verify configuration flows and recorder imports end to end.
 
 ## Energy Dashboard Setup
 
