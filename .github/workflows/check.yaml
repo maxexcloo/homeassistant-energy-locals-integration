@@ -25,6 +25,8 @@ jobs:
           persist-credentials: false
       - name: Set Up Shared Tools & Tasks
         uses: maxexcloo/dotfiles/.github/actions/mise@main
+        with:
+          tools: actionlint python ruff updatecli
       - name: Run Checks
         run: mise run check
 
