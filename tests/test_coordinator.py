@@ -2,86 +2,13 @@
 
 import asyncio
 import datetime
-import pathlib
-import sys
-import types
 import unittest
 from unittest.mock import AsyncMock, Mock
 
+from support import prepare_coordinator, prepare_integration
 
-def _package(name):
-    """Install and return a package stand-in."""
-    module = types.ModuleType(name)
-    module.__path__ = []
-    sys.modules.setdefault(name, module)
-    return sys.modules[name]
-
-
-_package("homeassistant")
-_package("homeassistant.components")
-recorder_module = _package("homeassistant.components.recorder")
-models_module = types.ModuleType("homeassistant.components.recorder.models")
-recorder_statistics_module = types.ModuleType(
-    "homeassistant.components.recorder.statistics"
-)
-config_entries_module = types.ModuleType("homeassistant.config_entries")
-core_module = types.ModuleType("homeassistant.core")
-exceptions_module = types.ModuleType("homeassistant.exceptions")
-_package("homeassistant.helpers")
-coordinator_module = types.ModuleType("homeassistant.helpers.update_coordinator")
-_package("homeassistant.util")
-dt_module = types.ModuleType("homeassistant.util.dt")
-
-
-class _Dictionary(dict):
-    """Stand in for Home Assistant's typed statistic dictionaries."""
-
-
-class _DataUpdateCoordinator:
-    def __init__(self, hass, _logger, **_kwargs):
-        self.data = None
-        self.hass = hass
-
-    async def async_refresh(self):
-        return await self._async_update_data()
-
-
-class _UpdateFailed(Exception):
-    """Stand in for Home Assistant's UpdateFailed."""
-
-
-class _ConfigEntryAuthFailed(Exception):
-    """Stand in for Home Assistant's ConfigEntryAuthFailed."""
-
-
-add_external_statistics = Mock()
-models_module.StatisticData = _Dictionary
-models_module.StatisticMeanType = types.SimpleNamespace(NONE=0)
-models_module.StatisticMetaData = _Dictionary
-recorder_module.get_instance = Mock()
-recorder_statistics_module.async_add_external_statistics = add_external_statistics
-recorder_statistics_module.get_last_statistics = Mock()
-config_entries_module.ConfigEntry = object
-core_module.HomeAssistant = object
-exceptions_module.ConfigEntryAuthFailed = _ConfigEntryAuthFailed
-coordinator_module.DataUpdateCoordinator = _DataUpdateCoordinator
-coordinator_module.UpdateFailed = _UpdateFailed
-dt_module.now = lambda: datetime.datetime.now(datetime.UTC)
-
-sys.modules[models_module.__name__] = models_module
-sys.modules[recorder_statistics_module.__name__] = recorder_statistics_module
-sys.modules[config_entries_module.__name__] = config_entries_module
-sys.modules[core_module.__name__] = core_module
-sys.modules[exceptions_module.__name__] = exceptions_module
-sys.modules[coordinator_module.__name__] = coordinator_module
-sys.modules[dt_module.__name__] = dt_module
-
-INTEGRATION_DIR = (
-    pathlib.Path(__file__).parents[1] / "custom_components" / "energy_locals"
-)
-energy_locals_package = types.ModuleType("custom_components.energy_locals")
-energy_locals_package.__path__ = [str(INTEGRATION_DIR)]
-sys.modules.setdefault("custom_components.energy_locals", energy_locals_package)
+add_external_statistics = prepare_coordinator()
+prepare_integration()
 
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,

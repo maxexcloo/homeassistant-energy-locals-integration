@@ -1,16 +1,10 @@
 """Tests for paired statistic series handling."""
 
-import pathlib
-import sys
-import types
 import unittest
 
-INTEGRATION_DIR = (
-    pathlib.Path(__file__).parents[1] / "custom_components" / "energy_locals"
-)
-energy_locals_package = types.ModuleType("custom_components.energy_locals")
-energy_locals_package.__path__ = [str(INTEGRATION_DIR)]
-sys.modules.setdefault("custom_components.energy_locals", energy_locals_package)
+from support import prepare_integration
+
+prepare_integration()
 
 from custom_components.energy_locals.statistics import statistic_series_out_of_sync
 

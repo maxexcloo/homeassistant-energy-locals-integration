@@ -1,45 +1,13 @@
 """Tests for Energy Locals API failure handling."""
 
 import datetime
-import pathlib
-import sys
-import types
 import unittest
 from unittest.mock import Mock, patch
 
-try:
-    import requests
-except ImportError:
-    requests = types.ModuleType("requests")
+from support import prepare_integration, prepare_requests
 
-    class RequestException(Exception):
-        """Stand-in for requests.RequestException."""
-
-    class HTTPError(RequestException):
-        """Stand-in for requests.HTTPError."""
-
-        def __init__(self, *args, response=None):
-            super().__init__(*args)
-            self.response = response
-
-    class JSONDecodeError(RequestException):
-        """Stand-in for requests.JSONDecodeError."""
-
-    requests.exceptions = types.SimpleNamespace(
-        ConnectionError=RequestException,
-        HTTPError=HTTPError,
-        JSONDecodeError=JSONDecodeError,
-        RequestException=RequestException,
-    )
-    requests.post = Mock()
-    sys.modules["requests"] = requests
-
-INTEGRATION_DIR = (
-    pathlib.Path(__file__).parents[1] / "custom_components" / "energy_locals"
-)
-energy_locals_package = types.ModuleType("custom_components.energy_locals")
-energy_locals_package.__path__ = [str(INTEGRATION_DIR)]
-sys.modules.setdefault("custom_components.energy_locals", energy_locals_package)
+requests = prepare_requests()
+prepare_integration()
 
 from custom_components.energy_locals.api import (
     EnergyLocalsAccountError,

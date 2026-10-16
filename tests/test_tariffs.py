@@ -1,19 +1,11 @@
 """Tests for effective-dated tariff handling."""
 
 import datetime
-import pathlib
-import sys
-import types
 import unittest
 
-# Load the pure helper modules without executing the integration's Home Assistant
-# package initialiser. Home Assistant is not required for these unit tests.
-INTEGRATION_DIR = (
-    pathlib.Path(__file__).parents[1] / "custom_components" / "energy_locals"
-)
-energy_locals_package = types.ModuleType("custom_components.energy_locals")
-energy_locals_package.__path__ = [str(INTEGRATION_DIR)]
-sys.modules.setdefault("custom_components.energy_locals", energy_locals_package)
+from support import prepare_integration
+
+prepare_integration()
 
 from custom_components.energy_locals.const import (
     CONF_PRICE_SUPPLY_DOLLARS,
