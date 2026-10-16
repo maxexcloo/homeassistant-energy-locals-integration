@@ -39,6 +39,22 @@ from .tariffs import (
 TZ_SYDNEY = ZoneInfo("Australia/Sydney")
 
 
+async def _async_validate_account(hass, username, password, account_id):
+    """Validate credentials and account access with consistent form errors."""
+    api = EnergyLocalsAPI(username, password, account_id)
+    try:
+        await hass.async_add_executor_job(api.login)
+        yesterday = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
+        await hass.async_add_executor_job(api.get_data, yesterday)
+    except EnergyLocalsAuthError:
+        return {"base": "invalid_auth"}
+    except EnergyLocalsAccountError:
+        return {"base": "invalid_account"}
+    except EnergyLocalsAPIError:
+        return {"base": "cannot_connect"}
+    return {}
+
+
 def _finite_non_negative_price(value):
     """Validate a finite, non-negative tariff price."""
     price = float(value)
@@ -72,26 +88,18 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if datetime.date.fromisoformat(user_input[CONF_START_DATE]) > today:
                 errors["base"] = "start_date_future"
             else:
-                api = EnergyLocalsAPI(
+                errors = await _async_validate_account(
+                    self.hass,
                     user_input[CONF_USERNAME],
                     user_input[CONF_PASSWORD],
                     user_input[CONF_ACCOUNT],
                 )
-                try:
-                    await self.hass.async_add_executor_job(api.login)
-                    yesterday = today - datetime.timedelta(days=1)
-                    await self.hass.async_add_executor_job(api.get_data, yesterday)
+                if not errors:
                     user_input[CONF_TARIFFS] = normalise_tariffs(user_input)
                     return self.async_create_entry(
                         title=f"Energy Locals ({user_input[CONF_ACCOUNT]})",
                         data=user_input,
                     )
-                except EnergyLocalsAuthError:
-                    errors["base"] = "invalid_auth"
-                except EnergyLocalsAccountError:
-                    errors["base"] = "invalid_account"
-                except EnergyLocalsAPIError:
-                    errors["base"] = "cannot_connect"
 
         default_date = (
             datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=30)
@@ -126,24 +134,13 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="reauth_entry_missing")
 
         if user_input is not None:
-            api = EnergyLocalsAPI(
+            errors = await _async_validate_account(
+                self.hass,
                 user_input[CONF_USERNAME],
                 user_input[CONF_PASSWORD],
                 entry.data[CONF_ACCOUNT],
             )
-            try:
-                await self.hass.async_add_executor_job(api.login)
-                yesterday = datetime.datetime.now(
-                    TZ_SYDNEY
-                ).date() - datetime.timedelta(days=1)
-                await self.hass.async_add_executor_job(api.get_data, yesterday)
-            except EnergyLocalsAuthError:
-                errors["base"] = "invalid_auth"
-            except EnergyLocalsAccountError:
-                errors["base"] = "invalid_account"
-            except EnergyLocalsAPIError:
-                errors["base"] = "cannot_connect"
-            else:
+            if not errors:
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates={
@@ -194,23 +191,14 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
 
             account_changed = account_id != self.config_entry.data.get(CONF_ACCOUNT)
             if account_changed and not duplicate:
-                api = EnergyLocalsAPI(
-                    self.config_entry.data[CONF_USERNAME],
-                    self.config_entry.data[CONF_PASSWORD],
-                    account_id,
+                errors.update(
+                    await _async_validate_account(
+                        self.hass,
+                        self.config_entry.data[CONF_USERNAME],
+                        self.config_entry.data[CONF_PASSWORD],
+                        account_id,
+                    )
                 )
-                try:
-                    await self.hass.async_add_executor_job(api.login)
-                    yesterday = datetime.datetime.now(
-                        TZ_SYDNEY
-                    ).date() - datetime.timedelta(days=1)
-                    await self.hass.async_add_executor_job(api.get_data, yesterday)
-                except EnergyLocalsAuthError:
-                    errors["base"] = "invalid_auth"
-                except EnergyLocalsAccountError:
-                    errors["base"] = "invalid_account"
-                except EnergyLocalsAPIError:
-                    errors["base"] = "cannot_connect"
 
             try:
                 start_date = datetime.date.fromisoformat(user_input[CONF_START_DATE])
