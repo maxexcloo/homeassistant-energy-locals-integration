@@ -1,22 +1,6 @@
-[tools]
-# gh = "latest"
-# python = "latest"
-# ruff = "latest"
-# updatecli = "latest"
-
 # Development
 [tasks.check]
-description = "Run All Local Checks"
-run = """
-updatecli manifest validate --config .updatecli.d --disable-templating --strict
-ruff check .
-ruff format --check .
-python -m unittest discover -s tests
-"""
+depends = ["check:actions", "check:python", "check:updates", "test:python"]
 
 [tasks.fmt]
-description = "Format Python Files"
-run = """
-ruff check --fix --select I .
-ruff format .
-"""
+depends = ["fmt:python"]

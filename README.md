@@ -19,6 +19,9 @@ To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https
 
 ## Development
 
+Install the [shared Mise configuration](https://github.com/maxexcloo/dotfiles#shared-tools--tasks)
+before running local Mise tasks.
+
 Run `mise install` to install your configured development tools.
 Run the checks from the repository root:
 
