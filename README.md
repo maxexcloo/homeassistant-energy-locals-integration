@@ -95,3 +95,10 @@ afterwards to recalculate the affected historical cost.
 Changing the utility account validates and rebuilds the new account, then removes
 statistics belonging to the old account. If replacement history cannot be staged,
 the account change is reverted and the old statistics remain untouched.
+
+## Development
+
+Run `mise run check` for local validation, or `mise run test:python` for tests.
+The test task uses uv to provision an isolated Python 3.14 environment with
+Home Assistant and its custom-component pytest fixtures. External API calls
+remain mocked.

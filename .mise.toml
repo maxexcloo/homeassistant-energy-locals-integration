@@ -4,3 +4,7 @@ depends = ["check:actions", "check:python", "check:updates", "test:python"]
 
 [tasks.fmt]
 depends = ["fmt:python"]
+
+# Match the Python version supported by Home Assistant's pinned test dependencies.
+[tasks."test:python"]
+run = "uv run --no-project --python 3.14 --with-requirements requirements-test.txt python -B -m pytest"

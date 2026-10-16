@@ -1,14 +1,10 @@
 """Tests for Energy Locals coordinator rebuild handling."""
 
-import asyncio
 import datetime
-import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
-from support import prepare_coordinator, prepare_integration
-
-add_external_statistics = prepare_coordinator()
-prepare_integration()
+import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
@@ -28,25 +24,6 @@ from custom_components.energy_locals.coordinator import (
 )
 
 
-class _ConfigEntries:
-    def async_update_entry(self, entry, *, data, **_kwargs):
-        entry.data = data
-
-
-class _Entry:
-    def __init__(self, data):
-        self.data = data
-
-
-class _Hass:
-    def __init__(self):
-        self.config_entries = _ConfigEntries()
-        self.loop = None
-
-    async def async_add_executor_job(self, target, *args):
-        return target(*args)
-
-
 def _entry_data(start_date):
     return {
         CONF_ACCOUNT: "123",
@@ -58,30 +35,31 @@ def _entry_data(start_date):
     }
 
 
-class EnergyLocalsCoordinatorTests(unittest.TestCase):
-    """Exercise rebuild state without a Home Assistant installation."""
+class TestEnergyLocalsCoordinator:
+    """Exercise rebuild state with real Home Assistant config entries."""
 
-    def setUp(self):
-        add_external_statistics.reset_mock()
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+    @pytest.fixture(autouse=True)
+    async def setup_coordinator(self, hass):
+        """Create a real coordinator and mock only external API/recorder writes."""
         self.day = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
         self.api = Mock()
-        self.hass = _Hass()
-        self.entry = _Entry(_entry_data(self.day))
-        self.coordinator = EnergyLocalsCoordinator(self.hass, self.api, self.entry)
+        self.hass = hass
+        self.entry = MockConfigEntry(domain="energy_locals", data=_entry_data(self.day))
+        self.entry.add_to_hass(hass)
+        self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)
+        with patch(
+            "custom_components.energy_locals.coordinator.async_add_external_statistics"
+        ) as statistics:
+            self.add_external_statistics = statistics
+            yield
 
-    def tearDown(self):
-        self.loop.close()
-        asyncio.set_event_loop(None)
-
-    def test_completeness_requires_the_requested_local_day(self):
+    async def test_completeness_requires_the_requested_local_day(self):
         next_day = self.day + datetime.timedelta(days=1)
         data = [{"dateValue": f"{next_day}T23:30:00", "y": 1.0}]
-        self.assertFalse(self.coordinator._is_day_complete(data, self.day))
-        self.assertTrue(self.coordinator._is_day_complete(data, next_day))
+        assert not self.coordinator._is_day_complete(data, self.day)
+        assert self.coordinator._is_day_complete(data, next_day)
 
-    def test_wrong_day_final_interval_does_not_publish_partial_history(self):
+    async def test_wrong_day_final_interval_does_not_publish_partial_history(self):
         next_day = self.day + datetime.timedelta(days=1)
         self.api.get_data.return_value = [
             {"dateValue": f"{self.day}T00:00:00", "y": 1.0},
@@ -90,11 +68,11 @@ class EnergyLocalsCoordinatorTests(unittest.TestCase):
         self.coordinator._get_db_total = AsyncMock(
             side_effect=[(None, None), (None, None)]
         )
-        with self.assertRaises(UpdateFailed):
-            self.loop.run_until_complete(self.coordinator._perform_sync())
-        add_external_statistics.assert_not_called()
+        with pytest.raises(UpdateFailed):
+            await self.coordinator._perform_sync()
+        self.add_external_statistics.assert_not_called()
 
-    def test_complete_manual_rebuild_updates_existing_statistics(self):
+    async def test_complete_manual_rebuild_updates_existing_statistics(self):
         last_start = datetime.datetime.combine(
             self.day, datetime.time(23), tzinfo=TZ_SYDNEY
         ).timestamp()
@@ -106,16 +84,16 @@ class EnergyLocalsCoordinatorTests(unittest.TestCase):
             {"dateValue": f"{self.day}T23:30:00", "y": 2.0}
         ]
         self.coordinator._async_clear_imported_statistics = AsyncMock()
-
-        result = self.loop.run_until_complete(self.coordinator._perform_sync())
-
-        self.assertEqual(result["total_kwh"], 2.0)
-        self.assertEqual(add_external_statistics.call_count, 2)
+        result = await self.coordinator._perform_sync()
+        assert result["total_kwh"] == 2.0
+        assert self.add_external_statistics.call_count == 2
         self.coordinator._async_clear_imported_statistics.assert_not_awaited()
 
-    def test_partial_manual_rebuild_preserves_existing_statistics(self):
+    async def test_partial_manual_rebuild_preserves_existing_statistics(self):
         first_day = self.day - datetime.timedelta(days=1)
-        self.entry.data[CONF_START_DATE] = first_day.isoformat()
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_START_DATE: first_day.isoformat()}
+        )
         last_start = datetime.datetime.combine(
             self.day, datetime.time(23), tzinfo=TZ_SYDNEY
         ).timestamp()
@@ -128,40 +106,40 @@ class EnergyLocalsCoordinatorTests(unittest.TestCase):
             [],
         ]
         self.coordinator._async_clear_imported_statistics = AsyncMock()
-
-        with self.assertRaisesRegex(UpdateFailed, "replacement history is incomplete"):
-            self.loop.run_until_complete(self.coordinator._perform_sync())
-
-        add_external_statistics.assert_not_called()
+        with pytest.raises(UpdateFailed, match="replacement history is incomplete"):
+            await self.coordinator._perform_sync()
+        self.add_external_statistics.assert_not_called()
         self.coordinator._async_clear_imported_statistics.assert_not_awaited()
 
-    def test_modern_metadata_omits_deprecated_has_mean(self):
+    async def test_modern_metadata_omits_deprecated_has_mean(self):
         metadata = _statistic_metadata(
             name="Usage",
             statistic_id="energy_locals:test",
             unit="kWh",
             unit_class="energy",
         )
-        self.assertEqual(metadata["mean_type"], 0)
-        self.assertEqual(metadata["unit_class"], "energy")
-        self.assertNotIn("has_mean", metadata)
+        assert metadata["mean_type"] == 0
+        assert metadata["unit_class"] == "energy"
+        assert "has_mean" not in metadata
 
-    def test_reset_does_not_clear_when_no_replacement_history_exists(self):
-        self.entry.data[CONF_RESET_STATISTICS] = True
+    async def test_reset_does_not_clear_when_no_replacement_history_exists(self):
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
+        )
         self.api.get_data.return_value = []
         self.coordinator._get_db_total = AsyncMock(
             side_effect=[(12.0, 1.0), (4.0, 1.0)]
         )
         self.coordinator._async_clear_imported_statistics = AsyncMock()
-
-        with self.assertRaises(UpdateFailed):
-            self.loop.run_until_complete(self.coordinator._perform_sync())
-
+        with pytest.raises(UpdateFailed):
+            await self.coordinator._perform_sync()
         self.coordinator._async_clear_imported_statistics.assert_not_awaited()
         self.api.get_data.assert_called_once_with(self.day)
 
-    def test_reset_clears_only_after_replacement_history_is_staged(self):
-        self.entry.data[CONF_RESET_STATISTICS] = True
+    async def test_reset_clears_only_after_replacement_history_is_staged(self):
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
+        )
         self.api.get_data.return_value = [
             {"dateValue": f"{self.day.isoformat()}T23:30:00", "y": 1.0}
         ]
@@ -169,52 +147,44 @@ class EnergyLocalsCoordinatorTests(unittest.TestCase):
             side_effect=[(12.0, 1.0), (4.0, 1.0)]
         )
         self.coordinator._async_clear_imported_statistics = AsyncMock()
-
-        result = self.loop.run_until_complete(self.coordinator._perform_sync())
-
+        result = await self.coordinator._perform_sync()
         self.coordinator._async_clear_imported_statistics.assert_awaited_once()
-        self.assertEqual(result["total_kwh"], 1.0)
-        self.assertEqual(add_external_statistics.call_count, 2)
+        assert result["total_kwh"] == 1.0
+        assert self.add_external_statistics.call_count == 2
 
-    def test_rebuild_flags_are_consumed_after_failure(self):
-        self.entry.data.update(
-            {
+    async def test_rebuild_flags_are_consumed_after_failure(self):
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={
+                **self.entry.data,
                 CONF_RESET_ACCOUNT: "old-account",
                 CONF_RESET_STATISTICS: True,
-            }
+            },
         )
         self.coordinator._force_rebuild = True
         self.coordinator._perform_sync = AsyncMock(
             side_effect=UpdateFailed("source unavailable")
         )
+        with pytest.raises(UpdateFailed):
+            await self.coordinator._async_update_data()
+        assert not self.coordinator._force_rebuild
+        assert self.entry.data[CONF_ACCOUNT] == "old-account"
+        assert CONF_RESET_ACCOUNT not in self.entry.data
+        assert CONF_RESET_STATISTICS not in self.entry.data
 
-        with self.assertRaises(UpdateFailed):
-            self.loop.run_until_complete(self.coordinator._async_update_data())
-
-        self.assertFalse(self.coordinator._force_rebuild)
-        self.assertEqual(self.entry.data[CONF_ACCOUNT], "old-account")
-        self.assertNotIn(CONF_RESET_ACCOUNT, self.entry.data)
-        self.assertNotIn(CONF_RESET_STATISTICS, self.entry.data)
-
-    def test_zero_usage_history_remains_valid(self):
+    async def test_zero_usage_history_remains_valid(self):
         self.api.get_data.return_value = [
             {"dateValue": f"{self.day.isoformat()}T23:30:00", "y": 0.0}
         ]
         self.coordinator._get_db_total = AsyncMock(
             side_effect=[(None, None), (None, None)]
         )
-
-        result = self.loop.run_until_complete(self.coordinator._perform_sync())
-
-        self.assertEqual(result["total_kwh"], 0.0)
-        self.assertEqual(result["total_cost"], 0.94)
-        self.assertEqual(add_external_statistics.call_count, 2)
-        metadata = add_external_statistics.call_args_list[0].args[1]
-        self.assertEqual(metadata["mean_type"], 0)
-        self.assertEqual(metadata["unit_class"], "energy")
-        cost_statistics = add_external_statistics.call_args_list[1].args[2]
-        self.assertEqual(cost_statistics[0]["sum"], 0.94)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        result = await self.coordinator._perform_sync()
+        assert result["total_kwh"] == 0.0
+        assert result["total_cost"] == 0.94
+        assert self.add_external_statistics.call_count == 2
+        metadata = self.add_external_statistics.call_args_list[0].args[1]
+        assert metadata["mean_type"] == 0
+        assert metadata["unit_class"] == "energy"
+        cost_statistics = self.add_external_statistics.call_args_list[1].args[2]
+        assert cost_statistics[0]["sum"] == 0.94

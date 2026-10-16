@@ -2,10 +2,6 @@
 
 import unittest
 
-from support import prepare_integration
-
-prepare_integration()
-
 from custom_components.energy_locals.statistics import statistic_series_out_of_sync
 
 

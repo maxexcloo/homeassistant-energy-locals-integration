@@ -4,10 +4,7 @@ import datetime
 import unittest
 from unittest.mock import Mock, patch
 
-from support import prepare_integration, prepare_requests
-
-requests = prepare_requests()
-prepare_integration()
+import requests
 
 from custom_components.energy_locals.api import (
     EnergyLocalsAccountError,

@@ -3,10 +3,6 @@
 import datetime
 import unittest
 
-from support import prepare_integration
-
-prepare_integration()
-
 from custom_components.energy_locals.const import (
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
