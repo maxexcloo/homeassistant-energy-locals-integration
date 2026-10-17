@@ -18,6 +18,7 @@ from homeassistant.components.recorder.models import (
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -28,6 +29,7 @@ from homeassistant.util import dt as dt_util
 from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
     CONF_ACCOUNT,
+    CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
     CONF_RESET_STATISTICS,
@@ -35,20 +37,14 @@ from .const import (
     DOMAIN,
 )
 from .statistics import statistic_series_out_of_sync
-from .tariffs import (
-    daily_supply_charge,
-    interval_usage_cost,
-    normalise_tariffs,
-    tariff_for_date,
-)
+from .tariffs import normalise_tariffs, tariff_for_date
 
 _LOGGER = logging.getLogger(__name__)
 
 TZ_SYDNEY = ZoneInfo("Australia/Sydney")
 TZ_UTC = datetime.UTC
 
-# Days within which we require a complete day (23:30 present) before importing.
-# Beyond this, whatever the API has is treated as final (handles genuine data gaps).
+# Wait for recent incomplete days; older gaps can be skipped on initial imports.
 _DATA_GRACE_DAYS = 3
 
 
@@ -78,7 +74,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         self.api = api
         self.entry = entry
         self._force_rebuild = False
-        self._sync_lock = asyncio.Lock()
 
     def _statistic_ids(self, account_id):
         statistic_base = f"account_{account_id}"
@@ -157,6 +152,29 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
         return None, None
 
+    async def _async_validate_replacement(self, statistic_ids, statistics, end):
+        """Require replacement rows for every existing, non-future recorder hour."""
+        try:
+            existing = await get_instance(self.hass).async_add_executor_job(
+                statistics_during_period,
+                self.hass,
+                datetime.datetime(1970, 1, 1, tzinfo=TZ_UTC),
+                end,
+                set(statistic_ids),
+                "hour",
+                None,
+                {"sum"},
+            )
+        except Exception as err:
+            raise UpdateFailed("Unable to validate replacement history") from err
+        replacement_starts = {row["start"].timestamp() for row in statistics}
+        if any(
+            row["start"] not in replacement_starts
+            for rows in existing.values()
+            for row in rows
+        ):
+            raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
+
     def _extract_value(self, point):
         for key in ["y", "value", "val", "usage", "amount"]:
             if key in point:
@@ -169,51 +187,53 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         raise ValueError("Usage interval did not contain a finite numeric value")
 
     def _is_day_complete(self, usage_data: list, day: datetime.date) -> bool:
-        """Return True if the 23:30 interval is present, meaning the full day is published."""
+        """Require every half-hour interval, including daylight saving transitions."""
+        intervals = set()
         for p in usage_data:
             try:
                 dt = datetime.datetime.fromisoformat(p["dateValue"])
                 if not dt.tzinfo:
                     dt = dt.replace(tzinfo=TZ_SYDNEY, fold=1)
-                dt_local = dt.astimezone(TZ_SYDNEY)
-                if (
-                    dt_local.date() == day
-                    and dt_local.hour == 23
-                    and dt_local.minute == 30
-                ):
-                    return True
+                intervals.add(dt.astimezone(TZ_UTC))
             except KeyError, ValueError, TypeError:
                 continue
-        return False
+        start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
+            TZ_UTC
+        )
+        end = datetime.datetime.combine(
+            day + timedelta(days=1), datetime.time(), TZ_SYDNEY
+        ).astimezone(TZ_UTC)
+        return all(
+            start + timedelta(minutes=30 * index) in intervals
+            for index in range(int((end - start).total_seconds() / 1800))
+        )
 
     async def _async_update_data(self):
-        if self._sync_lock.locked():
-            return self.data if self.data else {}
-
+        # Home Assistant serialises refreshes. Consume only this refresh's request
+        # so a button press during an API await remains queued for the next one.
+        force_rebuild = self._force_rebuild
+        self._force_rebuild = False
         now_hour = datetime.datetime.now(TZ_SYDNEY).hour
         is_initial_run = self.data is None
 
-        # Logic: Run if Manual Force OR Initial Setup OR Lunch Time (12pm+)
         reset_requested = bool(self.entry.data.get(CONF_RESET_STATISTICS))
         should_run = (
-            self._force_rebuild or reset_requested or is_initial_run or (now_hour >= 12)
+            force_rebuild or reset_requested or is_initial_run or (now_hour >= 12)
         )
 
         if not should_run:
             return self.data
 
-        async with self._sync_lock:
-            rebuild_succeeded = False
-            try:
-                result = await self._perform_sync()
-                rebuild_succeeded = True
-                return result
-            finally:
-                self._force_rebuild = False
-                if reset_requested:
-                    self._consume_reset_request(rebuild_succeeded=rebuild_succeeded)
+        rebuild_succeeded = False
+        try:
+            result = await self._perform_sync(force_rebuild=force_rebuild)
+            rebuild_succeeded = True
+            return result
+        finally:
+            if reset_requested:
+                self._consume_reset_request(rebuild_succeeded=rebuild_succeeded)
 
-    async def _perform_sync(self):
+    async def _perform_sync(self, *, force_rebuild=False):
         conf = self.entry.data
         start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
         tariffs = normalise_tariffs(conf)
@@ -232,7 +252,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         today_syd = datetime.datetime.now(TZ_SYDNEY).date()
         current_tariff = tariff_for_date(tariffs, today_syd)
         price_kwh = current_tariff[CONF_PRICE_USAGE_DOLLARS]
-        is_rebuilding = self._force_rebuild or reset_requested
+        is_rebuilding = force_rebuild or reset_requested
         clear_before_import = reset_requested
 
         series_out_of_sync = statistic_series_out_of_sync(last_ts_e, last_ts_c)
@@ -334,12 +354,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 continue
 
             if not self._is_day_complete(usage_data, curr):
-                # Partial day — API hasn't published through 23:30 yet.
-                # Stop here to avoid writing an incomplete sum that corrupts future days.
+                # Stop before an incomplete day can corrupt subsequent sums.
                 if within_grace:
-                    _LOGGER.debug(
-                        "Day %s incomplete (no 23:30 interval), stopping sync", curr
-                    )
+                    _LOGGER.debug("Day %s has missing intervals, stopping sync", curr)
                     break
                 if is_rebuilding and not reset_requested:
                     raise UpdateFailed(
@@ -378,12 +395,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     raise UpdateFailed(
                         f"Invalid Energy Locals usage interval for {curr}"
                     ) from err
-                if not math.isfinite(val):
-                    raise UpdateFailed(
-                        f"Non-finite Energy Locals usage interval for {curr}"
-                    )
                 buckets[t_utc]["kwh"] += val
-                buckets[t_utc]["cost"] += interval_usage_cost(val, day_tariff)
+                buckets[t_utc]["cost"] += val * day_tariff[CONF_PRICE_USAGE_DOLLARS]
 
             if not buckets:
                 if is_rebuilding and not reset_requested:
@@ -394,7 +407,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 continue
 
             first_key = min(buckets)
-            buckets[first_key]["cost"] += daily_supply_charge(day_tariff)
+            buckets[first_key]["cost"] += day_tariff[CONF_PRICE_SUPPLY_DOLLARS]
 
             st_e, st_c = [], []
             for t in sorted(buckets.keys()):
@@ -418,10 +431,14 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         if not st_e_all and last_ts_e is None:
             raise UpdateFailed("No valid history found")
 
-        if is_rebuilding and not clear_before_import:
-            last_existing = max(last_ts_e or 0, last_ts_c or 0)
-            if not st_e_all or st_e_all[-1]["start"].timestamp() < last_existing:
+        if is_rebuilding and not reset_requested:
+            if not st_e_all:
                 raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
+            await self._async_validate_replacement(
+                (id_e, id_c),
+                st_e_all,
+                datetime.datetime.combine(today_syd, datetime.time(), TZ_SYDNEY),
+            )
 
         # Clear corrupt or explicitly reset series only after a replacement plan
         # has been staged. Explicit resets may skip genuine older gaps; automatic

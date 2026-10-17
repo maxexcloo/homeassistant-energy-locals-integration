@@ -29,9 +29,13 @@ Run the checks from the repository root:
 mise run check
 ```
 
-Unit tests use stand-ins for Home Assistant and do not contact Energy Locals.
-GitHub Actions also runs HACS and hassfest validation. A live Home Assistant
-installation is needed to verify configuration flows and recorder imports end to end.
+Run `mise run test:python` for tests only. The test task uses uv to provision an
+isolated Python 3.14 environment with Home Assistant and its custom-component
+pytest fixtures. Tests exercise configuration flows and recorder persistence;
+external API calls remain mocked.
+
+GitHub Actions also runs HACS and hassfest validation. Live verification requires
+a Home Assistant installation connected to Energy Locals.
 
 ## Energy Dashboard Setup
 
@@ -95,10 +99,3 @@ afterwards to recalculate the affected historical cost.
 Changing the utility account validates and rebuilds the new account, then removes
 statistics belonging to the old account. If replacement history cannot be staged,
 the account change is reverted and the old statistics remain untouched.
-
-## Development
-
-Run `mise run check` for local validation, or `mise run test:python` for tests.
-The test task uses uv to provision an isolated Python 3.14 environment with
-Home Assistant and its custom-component pytest fixtures. External API calls
-remain mocked.

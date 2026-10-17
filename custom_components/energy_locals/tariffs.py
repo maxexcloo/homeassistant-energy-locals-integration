@@ -81,13 +81,3 @@ def tariff_for_date(tariffs: list[dict], day: datetime.date) -> dict:
     if selected is None:
         raise ValueError(f"No tariff configured for {day.isoformat()}")
     return selected
-
-
-def interval_usage_cost(kwh: float, tariff: dict) -> float:
-    """Calculate usage cost for an interval."""
-    return kwh * tariff[CONF_PRICE_USAGE_DOLLARS]
-
-
-def daily_supply_charge(tariff: dict) -> float:
-    """Return the fixed supply charge for a published usage day."""
-    return tariff[CONF_PRICE_SUPPLY_DOLLARS]

@@ -11,8 +11,6 @@ from custom_components.energy_locals.const import (
 )
 from custom_components.energy_locals.tariffs import (
     TARIFF_EFFECTIVE_FROM,
-    daily_supply_charge,
-    interval_usage_cost,
     normalise_tariffs,
     tariff_for_date,
     upsert_tariff,
@@ -113,16 +111,6 @@ class TariffTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             tariff_for_date(tariffs, datetime.date(2026, 7, 31))
-
-    def test_zero_usage_day_still_has_supply_charge(self):
-        tariff = {
-            TARIFF_EFFECTIVE_FROM: "2026-08-01",
-            CONF_PRICE_USAGE_DOLLARS: 0.37,
-            CONF_PRICE_SUPPLY_DOLLARS: 1.05,
-        }
-
-        total_cost = interval_usage_cost(0.0, tariff) + daily_supply_charge(tariff)
-        self.assertEqual(total_cost, 1.05)
 
 
 if __name__ == "__main__":
