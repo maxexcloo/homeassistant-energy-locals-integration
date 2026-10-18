@@ -12,7 +12,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 class EnergyLocalsSyncButton(EnergyLocalsEntity, ButtonEntity):
     _attr_icon = "mdi:database-refresh"
-    _attr_suggested_object_id = "force_rebuild"
     _attr_translation_key = "rebuild_statistics"
 
     def __init__(self, coordinator, entry):
