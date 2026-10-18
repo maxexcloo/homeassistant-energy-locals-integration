@@ -1,5 +1,7 @@
 """Constants for the Energy Locals integration."""
 
+from zoneinfo import ZoneInfo
+
 DOMAIN = "energy_locals"
 
 CONF_ACCOUNT = "account_id"
@@ -16,3 +18,5 @@ CONF_USERNAME = "username"
 API_BASE = "https://uml-myaccount-api-app-au.azurewebsites.net"
 DATA_URL_TEMPLATE = f"{API_BASE}/utility-accounts/{{}}/usage-chart"
 LOGIN_URL = f"{API_BASE}/user/authenticate"
+
+TZ_SYDNEY = ZoneInfo("Australia/Sydney")

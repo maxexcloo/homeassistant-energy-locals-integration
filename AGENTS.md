@@ -6,8 +6,26 @@
 - Keep tests in `tests/`.
 - Keep user-visible strings in `translations/en.json`.
 
-## Style
+## Behaviour
 
-- Follow Home Assistant conventions and prefer direct, readable code.
-- Keep configuration and entity names stable unless a migration is included.
-- Sort imports with Ruff and keep constants and helpers consistently ordered.
+- Interpret usage days, tariff dates and import boundaries in `Australia/Sydney`.
+- Keep missing data as `None`; never substitute zero for unavailable usage or cost.
+- Never clear statistics before replacement data has been fetched and staged.
+- Automatic repairs and manual rebuilds must not overwrite existing statistics when
+  the replacement history has gaps; abort and keep the existing series.
+- Pass authentication failures up as `ConfigEntryAuthFailed` so Home Assistant
+  starts reauthentication.
+
+## Compatibility
+
+- Keep statistic IDs `energy_locals:account_<id>_usage` and
+  `energy_locals:account_<id>_cost` stable.
+- Keep config entry data, entity unique IDs and entity names stable unless a
+  config entry migration is included.
+- Keep the `hacs.json` minimum Home Assistant version equal to the version pinned
+  by `pytest-homeassistant-custom-component`; raise them together.
+
+## Changes
+
+- Cover behaviour changes with focused Home Assistant tests.
+- Update `README.md` when features or user-visible behaviour change.

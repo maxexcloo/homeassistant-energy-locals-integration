@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 
-from .const import DOMAIN
 from .entity import EnergyLocalsEntity
 
 
@@ -41,7 +40,7 @@ SENSORS = (
     EnergyLocalsSensorEntityDescription(
         key="price",
         translation_key="usage_price",
-        native_unit_of_measurement="$/kWh",
+        native_unit_of_measurement="AUD/kWh",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: data.get("price"),
     ),
@@ -56,7 +55,7 @@ SENSORS = (
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities(
         EnergyLocalsSensor(coordinator, entry, description) for description in SENSORS
     )
