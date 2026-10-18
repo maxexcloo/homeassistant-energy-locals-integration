@@ -4,6 +4,7 @@ import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.helpers.data_entry_flow import _BaseFlowManagerView
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.energy_locals.api import (
@@ -64,6 +65,58 @@ def mock_setup():
         ),
     ):
         yield
+
+
+@pytest.mark.usefixtures("mock_setup")
+@pytest.mark.parametrize("step", ["user", "reauth", "reconfigure", "options"])
+async def test_forms_serialise_for_the_frontend(hass, step):
+    """Every form schema converts the way the frontend flow view does."""
+    if step == "user":
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+    else:
+        entry = _entry(hass, _today() - datetime.timedelta(days=1))
+        if step == "reauth":
+            result = await entry.start_reauth_flow(hass)
+        elif step == "reconfigure":
+            result = await entry.start_reconfigure_flow(hass)
+        else:
+            result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == "form"
+    assert _BaseFlowManagerView(None)._prepare_result_json(result)["data_schema"]
+
+
+@pytest.mark.usefixtures("mock_setup")
+@pytest.mark.parametrize("step", ["user", "options"])
+async def test_infinite_prices_show_a_form_error(hass, step):
+    """Infinite prices pass the schema but are rejected without saving tariffs."""
+    yesterday = _today() - datetime.timedelta(days=1)
+    prices = {CONF_PRICE_SUPPLY_DOLLARS: 0.94, CONF_PRICE_USAGE_DOLLARS: float("inf")}
+    if step == "user":
+        with patch("custom_components.energy_locals.config_flow.EnergyLocalsAPI"):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": "user"},
+                data={
+                    CONF_ACCOUNT: "123",
+                    CONF_PASSWORD: "test-password",
+                    CONF_START_DATE: yesterday.isoformat(),
+                    CONF_USERNAME: "user@example.com",
+                    **prices,
+                },
+            )
+        assert not hass.config_entries.async_entries(DOMAIN)
+    else:
+        entry = _entry(hass, yesterday)
+        before = dict(entry.options)
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], prices
+        )
+        assert entry.options == before
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_price"}
 
 
 @pytest.mark.usefixtures("mock_setup")

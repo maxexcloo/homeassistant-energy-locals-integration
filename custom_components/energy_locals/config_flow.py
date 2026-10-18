@@ -1,7 +1,6 @@
 """Config flow for the Energy Locals integration."""
 
 import datetime
-import math
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -56,12 +55,8 @@ async def _async_validate_account(hass, username, password, account_id):
     return {}
 
 
-def _finite_non_negative_price(value):
-    """Validate a finite, non-negative tariff price."""
-    price = float(value)
-    if not math.isfinite(price) or price < 0:
-        raise vol.Invalid("Price must be finite and non-negative")
-    return price
+# Kept to validators the frontend can describe; tariffs reject non-finite prices.
+PRICE = vol.All(vol.Coerce(float), vol.Range(min=0))
 
 
 def _today():
@@ -87,28 +82,33 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(user_input[CONF_ACCOUNT])
             self._abort_if_unique_id_configured()
 
-            if datetime.date.fromisoformat(user_input[CONF_START_DATE]) > _today():
+            data = dict(user_input)
+            try:
+                tariffs = upsert_tariff(
+                    [],
+                    data[CONF_START_DATE],
+                    data.pop(CONF_PRICE_USAGE_DOLLARS),
+                    data.pop(CONF_PRICE_SUPPLY_DOLLARS),
+                )
+            except ValueError:
+                errors["base"] = "invalid_price"
+            if not errors and (
+                datetime.date.fromisoformat(data[CONF_START_DATE]) > _today()
+            ):
                 errors["base"] = "start_date_future"
-            else:
+            if not errors:
                 errors = await _async_validate_account(
                     self.hass,
-                    user_input[CONF_USERNAME],
-                    user_input[CONF_PASSWORD],
-                    user_input[CONF_ACCOUNT],
+                    data[CONF_USERNAME],
+                    data[CONF_PASSWORD],
+                    data[CONF_ACCOUNT],
                 )
-                if not errors:
-                    data = dict(user_input)
-                    tariffs = upsert_tariff(
-                        [],
-                        data[CONF_START_DATE],
-                        data.pop(CONF_PRICE_USAGE_DOLLARS),
-                        data.pop(CONF_PRICE_SUPPLY_DOLLARS),
-                    )
-                    return self.async_create_entry(
-                        title=entry_title(data[CONF_ACCOUNT]),
-                        data=data,
-                        options={CONF_TARIFFS: tariffs},
-                    )
+            if not errors:
+                return self.async_create_entry(
+                    title=entry_title(data[CONF_ACCOUNT]),
+                    data=data,
+                    options={CONF_TARIFFS: tariffs},
+                )
 
         default_date = (_today() - datetime.timedelta(days=30)).isoformat()
 
@@ -120,10 +120,10 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_START_DATE, default=default_date): DateSelector(),
                 vol.Required(
                     CONF_PRICE_USAGE_DOLLARS, default=DEFAULT_PRICE_USAGE_DOLLARS
-                ): _finite_non_negative_price,
+                ): PRICE,
                 vol.Required(
                     CONF_PRICE_SUPPLY_DOLLARS, default=DEFAULT_PRICE_SUPPLY_DOLLARS
-                ): _finite_non_negative_price,
+                ): PRICE,
             }
         )
 
@@ -232,6 +232,7 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def async_step_init(self, user_input=None):
         tariffs = normalise_tariffs(self.config_entry.options)
+        errors = {}
         if user_input is not None:
             effective_date = user_input[CONF_TARIFF_EFFECTIVE_DATE]
             usage_price = user_input[CONF_PRICE_USAGE_DOLLARS]
@@ -246,10 +247,14 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlowWithReload):
                 effective[CONF_PRICE_USAGE_DOLLARS],
                 effective[CONF_PRICE_SUPPLY_DOLLARS],
             ) != (usage_price, supply_price):
-                tariffs = upsert_tariff(
-                    tariffs, effective_date, usage_price, supply_price
-                )
-            return self.async_create_entry(data={CONF_TARIFFS: tariffs})
+                try:
+                    tariffs = upsert_tariff(
+                        tariffs, effective_date, usage_price, supply_price
+                    )
+                except ValueError:
+                    errors["base"] = "invalid_price"
+            if not errors:
+                return self.async_create_entry(data={CONF_TARIFFS: tariffs})
 
         today = _today()
         current_tariff = tariff_for_date(tariffs, today)
@@ -266,11 +271,11 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlowWithReload):
                 vol.Required(
                     CONF_PRICE_USAGE_DOLLARS,
                     default=current_tariff[CONF_PRICE_USAGE_DOLLARS],
-                ): _finite_non_negative_price,
+                ): PRICE,
                 vol.Required(
                     CONF_PRICE_SUPPLY_DOLLARS,
                     default=current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
-                ): _finite_non_negative_price,
+                ): PRICE,
                 vol.Required(
                     CONF_TARIFF_EFFECTIVE_DATE, default=today.isoformat()
                 ): DateSelector(),
@@ -280,4 +285,5 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlowWithReload):
             step_id="init",
             data_schema=schema,
             description_placeholders={"tariff_schedule": schedule},
+            errors=errors,
         )
