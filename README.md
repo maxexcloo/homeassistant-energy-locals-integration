@@ -2,6 +2,31 @@
 
 Imports interval usage data from [Energy Locals Urban](https://urban.energylocals.com.au/) into Home Assistant's long-term statistics, enabling the Energy Dashboard to display historical electricity consumption and cost.
 
+## Features
+
+- Automatic inconsistency detection and safe rebuilds
+- Effective-dated tariffs, so price changes only affect usage from their effective date
+- Half-hourly interval data imported as hourly long-term statistics
+- Manual non-destructive statistics rebuild button that preserves existing history if replacement data is incomplete
+- Supports multiple accounts
+- Tracks cumulative kWh usage and cost (with configurable daily supply charge)
+
+## Installation
+
+Requires Home Assistant **2026.10.2 or newer**.
+
+### HACS (Recommended)
+
+1. Open HACS in Home Assistant
+2. Go to **Integrations** → **⋮** → **Custom repositories**
+3. Add `https://github.com/maxexcloo/homeassistant-energy-locals-integration` with category **Integration**
+4. Search for **Energy Locals** and install
+5. Restart Home Assistant
+
+### Manual
+
+Copy the `custom_components/energy_locals/` folder into your HA `config/custom_components/` directory and restart.
+
 ## Configuration
 
 Go to **Settings → Devices & Services → Add Integration** and search for **Energy Locals**.
@@ -17,25 +42,26 @@ Go to **Settings → Devices & Services → Add Integration** and search for **E
 
 To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network, and look for a request to `/utility-accounts/{id}/usage-chart`.
 
-## Development
+## Updating Prices
 
-Install the [shared Mise configuration](https://github.com/maxexcloo/dotfiles#shared-tools--tasks)
-before running local Mise tasks.
+Go to **Settings → Devices & Services → Energy Locals → Configure** to add a
+tariff with its effective date, kWh rate, and daily supply charge. The effective
+date defaults to today. Future-dated tariffs become active automatically. Imports
+and rebuilds select the tariff that was active on each usage day, so later price
+changes do not alter earlier costs.
 
-Run `mise install` to install your configured development tools.
-Run the checks from the repository root:
+Entering the same effective date again replaces that tariff period. Submitting
+the prices already in effect on that date leaves the schedule unchanged. If
+adding or correcting a tariff that is already in effect, press **Rebuild
+Statistics** afterwards to recalculate the affected historical cost.
 
-```sh
-mise run check
-```
+## Changing the Account
 
-Run `mise run test:python` for tests only. The test task uses uv to provision an
-isolated Python 3.14 environment with Home Assistant and its custom-component
-pytest fixtures. Tests exercise configuration flows and recorder persistence;
-external API calls remain mocked.
-
-GitHub Actions also runs HACS and hassfest validation. Live verification requires
-a Home Assistant installation connected to Energy Locals.
+Use **Reconfigure** on the Energy Locals entry to change the utility account or
+import start date, or to clear imported statistics and rebuild them. Changing the
+utility account validates and rebuilds the new account, then removes statistics
+belonging to the old account. If replacement history cannot be staged, the
+account change is reverted and the old statistics remain untouched.
 
 ## Energy Dashboard Setup
 
@@ -59,51 +85,26 @@ entity IDs already stored in the entity registry.
 | `sensor.energy_locals_<account>_usage`              | Cumulative kWh total                         |
 | `sensor.energy_locals_<account>_usage_price`        | Configured rate (AUD/kWh)                    |
 
-## Features
+## Development
 
-- Automatic inconsistency detection and safe rebuilds
-- Half-hourly interval data imported as hourly long-term statistics
-- Manual non-destructive statistics rebuild button that preserves existing history if replacement data is incomplete
-- Supports multiple accounts
-- Tracks cumulative kWh usage and cost (with configurable daily supply charge)
+Install the [shared Mise configuration](https://github.com/maxexcloo/dotfiles#shared-tools--tasks)
+before running local Mise tasks.
 
-## Installation
+Run `mise install` to install your configured development tools.
+Run the checks from the repository root:
 
-Requires Home Assistant **2026.10.2 or newer**.
+```sh
+mise run check
+```
 
-### HACS (Recommended)
+Run `mise run test:python` for tests only. The test task uses uv to provision an
+isolated Python 3.14 environment with Home Assistant and its custom-component
+pytest fixtures. Tests exercise configuration flows and recorder persistence;
+external API calls remain mocked.
 
-1. Open HACS in Home Assistant
-2. Go to **Integrations** → **⋮** → **Custom repositories**
-3. Add `https://github.com/maxexcloo/homeassistant-energy-locals-integration` with category **Integration**
-4. Search for **Energy Locals** and install
-5. Restart Home Assistant
-
-### Manual
-
-Copy the `custom_components/energy_locals/` folder into your HA `config/custom_components/` directory and restart.
+GitHub Actions also runs HACS and hassfest validation. Live verification requires
+a Home Assistant installation connected to Energy Locals.
 
 ## Licence
 
 AGPL-3.0 - see [LICENSE](LICENSE).
-
-## Updating Prices
-
-Go to **Settings → Devices & Services → Energy Locals → Configure** to add a
-tariff with its effective date, kWh rate, and daily supply charge. The effective
-date defaults to today. Future-dated tariffs become active automatically. Imports
-and rebuilds select the tariff that was active on each usage day, so later price
-changes do not alter earlier costs.
-
-Entering the same effective date again replaces that tariff period. Submitting
-the prices already in effect on that date leaves the schedule unchanged. If
-adding or correcting a tariff that is already in effect, press **Rebuild
-Statistics** afterwards to recalculate the affected historical cost.
-
-## Changing the Account
-
-Use **Reconfigure** on the Energy Locals entry to change the utility account or
-import start date, or to clear imported statistics and rebuild them. Changing the
-utility account validates and rebuilds the new account, then removes statistics
-belonging to the old account. If replacement history cannot be staged, the
-account change is reverted and the old statistics remain untouched.
