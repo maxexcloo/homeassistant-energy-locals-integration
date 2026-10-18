@@ -7,7 +7,6 @@ import datetime
 import logging
 import math
 from datetime import timedelta
-from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import (
@@ -26,7 +25,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
+from .api import (
+    EnergyLocalsAccountError,
+    EnergyLocalsAPI,
+    EnergyLocalsAPIError,
+    EnergyLocalsAuthError,
+)
 from .const import (
     CONF_ACCOUNT,
     CONF_PRICE_SUPPLY_DOLLARS,
@@ -35,17 +39,43 @@ from .const import (
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     DOMAIN,
+    TZ_SYDNEY,
 )
-from .statistics import statistic_series_out_of_sync
 from .tariffs import normalise_tariffs, tariff_for_date
 
 _LOGGER = logging.getLogger(__name__)
 
-TZ_SYDNEY = ZoneInfo("Australia/Sydney")
-TZ_UTC = datetime.UTC
-
 # Wait for recent incomplete days; older gaps can be skipped on initial imports.
 _DATA_GRACE_DAYS = 3
+
+
+def _statistic_series_out_of_sync(
+    usage_start: float | None, cost_start: float | None
+) -> bool:
+    """Return whether paired usage and cost series need rebuilding."""
+    if (usage_start is None) != (cost_start is None):
+        return True
+    return usage_start is not None and usage_start != cost_start
+
+
+def _interval_starts(usage_data: list) -> list[tuple[dict, datetime.datetime]]:
+    """Return each interval with its UTC start, skipping malformed points."""
+    intervals = []
+    seen = set()
+    for point in usage_data:
+        try:
+            start = datetime.datetime.fromisoformat(point["dateValue"])
+        except KeyError, ValueError, TypeError:
+            _LOGGER.debug("Skipping malformed data point: %s", point)
+            continue
+        if not start.tzinfo:
+            # Sydney wall times repeat when daylight saving ends. Without an
+            # offset only order separates them: a repeat is the standard-time one.
+            local_start = start.replace(tzinfo=TZ_SYDNEY, fold=int(start in seen))
+            seen.add(start)
+            start = local_start
+        intervals.append((point, start.astimezone(datetime.UTC)))
+    return intervals
 
 
 def _statistic_metadata(
@@ -68,11 +98,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
-            update_interval=timedelta(hours=12),
+            update_interval=timedelta(hours=6),
         )
         self.api = api
-        self.entry = entry
         self._force_rebuild = False
 
     def _statistic_ids(self, account_id):
@@ -116,9 +146,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
     def _consume_reset_request(self, *, rebuild_succeeded: bool):
         """Remove one-shot reset state after its rebuild attempt finishes."""
-        if not self.entry.data.get(CONF_RESET_STATISTICS):
+        if not self.config_entry.data.get(CONF_RESET_STATISTICS):
             return
-        data = dict(self.entry.data)
+        data = dict(self.config_entry.data)
         previous_account = data.pop(CONF_RESET_ACCOUNT, None)
         data.pop(CONF_RESET_STATISTICS, None)
         if (
@@ -128,13 +158,15 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         ):
             data[CONF_ACCOUNT] = previous_account
             self.hass.config_entries.async_update_entry(
-                self.entry,
+                self.config_entry,
                 data=data,
                 title=f"Energy Locals ({previous_account})",
                 unique_id=previous_account,
             )
+            # The API client and device were set up for the rejected account.
+            self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
             return
-        self.hass.config_entries.async_update_entry(self.entry, data=data)
+        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
 
     async def _get_db_total(self, statistic_id):
         try:
@@ -158,7 +190,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             existing = await get_instance(self.hass).async_add_executor_job(
                 statistics_during_period,
                 self.hass,
-                datetime.datetime(1970, 1, 1, tzinfo=TZ_UTC),
+                datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC),
                 end,
                 set(statistic_ids),
                 "hour",
@@ -176,33 +208,23 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
 
     def _extract_value(self, point):
-        for key in ["y", "value", "val", "usage", "amount"]:
-            if key in point:
-                try:
-                    value = float(point[key])
-                except ValueError, TypeError:
-                    continue
-                if math.isfinite(value):
-                    return max(0.0, value)
-        raise ValueError("Usage interval did not contain a finite numeric value")
+        try:
+            value = float(point["y"])
+        except KeyError, ValueError, TypeError:
+            value = math.nan
+        if not math.isfinite(value):
+            raise ValueError("Usage interval did not contain a finite numeric value")
+        return max(0.0, value)
 
     def _is_day_complete(self, usage_data: list, day: datetime.date) -> bool:
         """Require every half-hour interval, including daylight saving transitions."""
-        intervals = set()
-        for p in usage_data:
-            try:
-                dt = datetime.datetime.fromisoformat(p["dateValue"])
-                if not dt.tzinfo:
-                    dt = dt.replace(tzinfo=TZ_SYDNEY, fold=1)
-                intervals.add(dt.astimezone(TZ_UTC))
-            except KeyError, ValueError, TypeError:
-                continue
+        intervals = {start for _point, start in _interval_starts(usage_data)}
         start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
-            TZ_UTC
+            datetime.UTC
         )
         end = datetime.datetime.combine(
             day + timedelta(days=1), datetime.time(), TZ_SYDNEY
-        ).astimezone(TZ_UTC)
+        ).astimezone(datetime.UTC)
         return all(
             start + timedelta(minutes=30 * index) in intervals
             for index in range(int((end - start).total_seconds() / 1800))
@@ -213,32 +235,28 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # so a button press during an API await remains queued for the next one.
         force_rebuild = self._force_rebuild
         self._force_rebuild = False
-        now_hour = datetime.datetime.now(TZ_SYDNEY).hour
-        is_initial_run = self.data is None
-
-        reset_requested = bool(self.entry.data.get(CONF_RESET_STATISTICS))
-        should_run = (
-            force_rebuild or reset_requested or is_initial_run or (now_hour >= 12)
-        )
-
-        if not should_run:
-            return self.data
-
-        rebuild_succeeded = False
+        reset_requested = bool(self.config_entry.data.get(CONF_RESET_STATISTICS))
         try:
             result = await self._perform_sync(force_rebuild=force_rebuild)
-            rebuild_succeeded = True
-            return result
-        finally:
-            if reset_requested:
-                self._consume_reset_request(rebuild_succeeded=rebuild_succeeded)
+        except UpdateFailed as err:
+            # Keep a reset queued through connection failures so it retries.
+            cause = err.__cause__
+            transient = isinstance(cause, EnergyLocalsAPIError) and not isinstance(
+                cause, EnergyLocalsAccountError
+            )
+            if reset_requested and not transient:
+                self._consume_reset_request(rebuild_succeeded=False)
+            raise
+        if reset_requested:
+            self._consume_reset_request(rebuild_succeeded=True)
+        return result
 
     async def _perform_sync(self, *, force_rebuild=False):
-        conf = self.entry.data
+        conf = self.config_entry.data
         start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
-        tariffs = normalise_tariffs(conf)
+        tariffs = normalise_tariffs(self.config_entry.options)
 
-        account_id = self.entry.data[CONF_ACCOUNT]
+        account_id = self.config_entry.data[CONF_ACCOUNT]
         id_e, id_c = self._statistic_ids(account_id)
         reset_requested = bool(conf.get(CONF_RESET_STATISTICS))
 
@@ -255,7 +273,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         is_rebuilding = force_rebuild or reset_requested
         clear_before_import = reset_requested
 
-        series_out_of_sync = statistic_series_out_of_sync(last_ts_e, last_ts_c)
+        series_out_of_sync = _statistic_series_out_of_sync(last_ts_e, last_ts_c)
         if series_out_of_sync and not is_rebuilding:
             _LOGGER.warning(
                 "Energy Locals usage and cost statistics are out of sync; "
@@ -267,7 +285,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # Detect database corruption without treating valid zero usage as corrupt.
         if not is_rebuilding and last_ts_e:
             last_dt_syd = datetime.datetime.fromtimestamp(
-                last_ts_e, tz=TZ_UTC
+                last_ts_e, tz=datetime.UTC
             ).astimezone(TZ_SYDNEY)
             if last_dt_syd.date() >= today_syd:
                 _LOGGER.warning(
@@ -284,7 +302,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             g_cost = 0.0
         elif last_ts_e:
             last_dt_syd = datetime.datetime.fromtimestamp(
-                last_ts_e, tz=TZ_UTC
+                last_ts_e, tz=datetime.UTC
             ).astimezone(TZ_SYDNEY)
             curr = last_dt_syd.date() + timedelta(days=1)
         else:
@@ -369,22 +387,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             buckets = {}
             day_tariff = tariff_for_date(tariffs, curr)
 
-            for p in usage_data:
-                try:
-                    dt_p = datetime.datetime.fromisoformat(p["dateValue"])
-                except KeyError, ValueError, TypeError:
-                    _LOGGER.debug("Skipping malformed data point: %s", p)
+            for p, start in _interval_starts(usage_data):
+                if start.astimezone(TZ_SYDNEY).date() != curr:
                     continue
 
-                if not dt_p.tzinfo:
-                    dt_p = dt_p.replace(tzinfo=TZ_SYDNEY, fold=1)
-
-                if dt_p.astimezone(TZ_SYDNEY).date() != curr:
-                    continue
-
-                t_utc = dt_p.astimezone(TZ_UTC).replace(
-                    minute=0, second=0, microsecond=0
-                )
+                t_utc = start.replace(minute=0, second=0, microsecond=0)
 
                 if t_utc not in buckets:
                     buckets[t_utc] = {"cost": 0.0, "kwh": 0.0}

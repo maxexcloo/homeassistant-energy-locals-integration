@@ -14,37 +14,45 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
 
+from custom_components.energy_locals.api import EnergyLocalsAPIError
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
-    CONF_PRICE_SUPPLY_DOLLARS,
-    CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
+    CONF_TARIFFS,
     CONF_USERNAME,
+    DOMAIN,
+    TZ_SYDNEY,
 )
 from custom_components.energy_locals.coordinator import (
-    TZ_SYDNEY,
     EnergyLocalsCoordinator,
     UpdateFailed,
     _statistic_metadata,
+    _statistic_series_out_of_sync,
 )
+from custom_components.energy_locals.tariffs import upsert_tariff
 
 
-def _entry_data(start_date):
-    return {
-        CONF_ACCOUNT: "123",
-        CONF_PASSWORD: "secret",
-        CONF_PRICE_SUPPLY_DOLLARS: 0.94,
-        CONF_PRICE_USAGE_DOLLARS: 0.359,
-        CONF_START_DATE: start_date.isoformat(),
-        CONF_USERNAME: "user@example.com",
-    }
+def _entry(start_date):
+    """Return a current-version entry with one tariff from the start date."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_ACCOUNT: "123",
+            CONF_PASSWORD: "secret",
+            CONF_START_DATE: start_date.isoformat(),
+            CONF_USERNAME: "user@example.com",
+        },
+        options={CONF_TARIFFS: upsert_tariff([], start_date.isoformat(), 0.359, 0.94)},
+        unique_id="123",
+        version=3,
+    )
 
 
-def _usage_data(day, total=1.0):
-    """Build a full local day of offset-aware half-hour readings."""
+def _usage_data(day, total=1.0, *, offset=True):
+    """Build a full local day of half-hour readings, optionally without offsets."""
     start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
         datetime.UTC
     )
@@ -56,11 +64,48 @@ def _usage_data(day, total=1.0):
         {
             "dateValue": (start + datetime.timedelta(minutes=30 * index))
             .astimezone(TZ_SYDNEY)
+            .replace(tzinfo=None if not offset else TZ_SYDNEY)
             .isoformat(),
             "y": total / count,
         }
         for index in range(count)
     ]
+
+
+@pytest.mark.parametrize(
+    ("usage_start", "cost_start", "out_of_sync"),
+    [
+        (None, None, False),
+        (123.0, 123.0, False),
+        (123.0, None, True),
+        (None, 123.0, True),
+        (123.0, 456.0, True),
+    ],
+)
+def test_statistic_series_out_of_sync(usage_start, cost_start, out_of_sync):
+    """Paired usage and cost series rebuild when their last rows differ."""
+    assert _statistic_series_out_of_sync(usage_start, cost_start) is out_of_sync
+
+
+@pytest.mark.parametrize("offset", [False, True])
+async def test_daylight_saving_end_imports_the_repeated_hour(hass, freezer, offset):
+    """Both 02:00 hours on the day daylight saving ends become separate rows."""
+    day = datetime.date(2026, 4, 5)
+    freezer.move_to("2026-04-06T12:00:00+10:00")
+    entry = _entry(day)
+    entry.add_to_hass(hass)
+    api = Mock()
+    api.get_data.return_value = _usage_data(day, total=25.0, offset=offset)
+    coordinator = EnergyLocalsCoordinator(hass, api, entry)
+    coordinator._get_db_total = AsyncMock(side_effect=[(None, None), (None, None)])
+    with patch(
+        "custom_components.energy_locals.coordinator.async_add_external_statistics"
+    ) as add_statistics:
+        result = await coordinator._perform_sync()
+    usage = add_statistics.call_args_list[0].args[2]
+    assert len(usage) == 25
+    assert len({row["start"] for row in usage}) == 25
+    assert result["total_kwh"] == pytest.approx(25.0)
 
 
 class TestEnergyLocalsCoordinator:
@@ -72,7 +117,7 @@ class TestEnergyLocalsCoordinator:
         self.day = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
         self.api = Mock()
         self.hass = hass
-        self.entry = MockConfigEntry(domain="energy_locals", data=_entry_data(self.day))
+        self.entry = _entry(self.day)
         self.entry.add_to_hass(hass)
         self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)
         self.coordinator._async_validate_replacement = AsyncMock()
@@ -81,6 +126,13 @@ class TestEnergyLocalsCoordinator:
         ) as statistics:
             self.add_external_statistics = statistics
             yield
+
+    async def test_usage_values_come_from_the_chart_y_value(self):
+        assert self.coordinator._extract_value({"y": "1.5"}) == 1.5
+        assert self.coordinator._extract_value({"y": -1}) == 0.0
+        for point in ({"value": 1.0}, {"y": None}, {"y": "nan"}):
+            with pytest.raises(ValueError):
+                self.coordinator._extract_value(point)
 
     async def test_completeness_requires_the_requested_local_day(self):
         next_day = self.day + datetime.timedelta(days=1)
@@ -96,8 +148,11 @@ class TestEnergyLocalsCoordinator:
             (datetime.date(2026, 10, 17), 48),
         ],
     )
-    async def test_completeness_accounts_for_daylight_saving(self, day, interval_count):
-        data = _usage_data(day)
+    @pytest.mark.parametrize("offset", [False, True])
+    async def test_completeness_accounts_for_daylight_saving(
+        self, day, interval_count, offset
+    ):
+        data = _usage_data(day, offset=offset)
         assert len(data) == interval_count
         assert self.coordinator._is_day_complete(data, day)
         data.pop(interval_count // 2)
@@ -210,6 +265,33 @@ class TestEnergyLocalsCoordinator:
         assert CONF_RESET_ACCOUNT not in self.entry.data
         assert CONF_RESET_STATISTICS not in self.entry.data
 
+    async def test_reset_stays_queued_after_a_connection_failure(self):
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={
+                **self.entry.data,
+                CONF_RESET_ACCOUNT: "old-account",
+                CONF_RESET_STATISTICS: True,
+            },
+        )
+        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
+        self.api.get_data.side_effect = EnergyLocalsAPIError("offline")
+        with (
+            patch("custom_components.energy_locals.coordinator.asyncio.sleep"),
+            pytest.raises(UpdateFailed),
+        ):
+            await self.coordinator._async_update_data()
+        assert self.entry.data[CONF_ACCOUNT] == "123"
+        assert self.entry.data[CONF_RESET_STATISTICS]
+
+        self.api.get_data.side_effect = None
+        self.api.get_data.return_value = _usage_data(self.day)
+        self.coordinator._async_clear_imported_statistics = AsyncMock()
+        await self.coordinator._async_update_data()
+        self.coordinator._async_clear_imported_statistics.assert_awaited_once()
+        assert self.entry.data[CONF_ACCOUNT] == "123"
+        assert CONF_RESET_STATISTICS not in self.entry.data
+
     async def test_zero_usage_history_remains_valid(self):
         self.api.get_data.return_value = _usage_data(self.day, total=0.0)
         self.coordinator._get_db_total = AsyncMock(
@@ -240,9 +322,7 @@ class TestRecorderRebuilds:
         self.recorder = recorder_mock
         self.day = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
         self.first_day = self.day - datetime.timedelta(days=1)
-        self.entry = MockConfigEntry(
-            domain="energy_locals", data=_entry_data(self.first_day)
-        )
+        self.entry = _entry(self.first_day)
         self.entry.add_to_hass(hass)
         self.api = Mock()
         self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://www.updatecli.io/schema/latest/policy/manifest/config.json
+name: Update pytest-homeassistant-custom-component In requirements-test.txt
+pipelineid: update-pytest-homeassistant-custom-component-in-requirements-test-txt
+labels:
+  group: python
+sources:
+  version:
+    kind: pypi
+    spec:
+      name: pytest-homeassistant-custom-component
+      versionfilter:
+        kind: pep440
+        pattern: "*"
+targets:
+  pin:
+    kind: file
+    sourceid: version
+    spec:
+      file: requirements-test.txt
+      matchpattern: (pytest-homeassistant-custom-component==)[0-9.]+
+      replacepattern: ${1}{{ source "version" }}

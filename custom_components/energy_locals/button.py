@@ -2,18 +2,16 @@
 
 from homeassistant.components.button import ButtonEntity
 
-from .const import DOMAIN
 from .entity import EnergyLocalsEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities([EnergyLocalsSyncButton(coordinator, entry)])
 
 
 class EnergyLocalsSyncButton(EnergyLocalsEntity, ButtonEntity):
     _attr_icon = "mdi:database-refresh"
-    _attr_suggested_object_id = "force_rebuild"
     _attr_translation_key = "rebuild_statistics"
 
     def __init__(self, coordinator, entry):
