@@ -7,7 +7,6 @@ import datetime
 import logging
 import math
 from datetime import timedelta
-from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import (
@@ -35,17 +34,23 @@ from .const import (
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     DOMAIN,
+    TZ_SYDNEY,
 )
-from .statistics import statistic_series_out_of_sync
 from .tariffs import normalise_tariffs, tariff_for_date
 
 _LOGGER = logging.getLogger(__name__)
 
-TZ_SYDNEY = ZoneInfo("Australia/Sydney")
-TZ_UTC = datetime.UTC
-
 # Wait for recent incomplete days; older gaps can be skipped on initial imports.
 _DATA_GRACE_DAYS = 3
+
+
+def _statistic_series_out_of_sync(
+    usage_start: float | None, cost_start: float | None
+) -> bool:
+    """Return whether paired usage and cost series need rebuilding."""
+    if (usage_start is None) != (cost_start is None):
+        return True
+    return usage_start is not None and usage_start != cost_start
 
 
 def _statistic_metadata(
@@ -158,7 +163,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             existing = await get_instance(self.hass).async_add_executor_job(
                 statistics_during_period,
                 self.hass,
-                datetime.datetime(1970, 1, 1, tzinfo=TZ_UTC),
+                datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC),
                 end,
                 set(statistic_ids),
                 "hour",
@@ -194,15 +199,15 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 dt = datetime.datetime.fromisoformat(p["dateValue"])
                 if not dt.tzinfo:
                     dt = dt.replace(tzinfo=TZ_SYDNEY, fold=1)
-                intervals.add(dt.astimezone(TZ_UTC))
+                intervals.add(dt.astimezone(datetime.UTC))
             except KeyError, ValueError, TypeError:
                 continue
         start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
-            TZ_UTC
+            datetime.UTC
         )
         end = datetime.datetime.combine(
             day + timedelta(days=1), datetime.time(), TZ_SYDNEY
-        ).astimezone(TZ_UTC)
+        ).astimezone(datetime.UTC)
         return all(
             start + timedelta(minutes=30 * index) in intervals
             for index in range(int((end - start).total_seconds() / 1800))
@@ -255,7 +260,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         is_rebuilding = force_rebuild or reset_requested
         clear_before_import = reset_requested
 
-        series_out_of_sync = statistic_series_out_of_sync(last_ts_e, last_ts_c)
+        series_out_of_sync = _statistic_series_out_of_sync(last_ts_e, last_ts_c)
         if series_out_of_sync and not is_rebuilding:
             _LOGGER.warning(
                 "Energy Locals usage and cost statistics are out of sync; "
@@ -267,7 +272,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # Detect database corruption without treating valid zero usage as corrupt.
         if not is_rebuilding and last_ts_e:
             last_dt_syd = datetime.datetime.fromtimestamp(
-                last_ts_e, tz=TZ_UTC
+                last_ts_e, tz=datetime.UTC
             ).astimezone(TZ_SYDNEY)
             if last_dt_syd.date() >= today_syd:
                 _LOGGER.warning(
@@ -284,7 +289,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             g_cost = 0.0
         elif last_ts_e:
             last_dt_syd = datetime.datetime.fromtimestamp(
-                last_ts_e, tz=TZ_UTC
+                last_ts_e, tz=datetime.UTC
             ).astimezone(TZ_SYDNEY)
             curr = last_dt_syd.date() + timedelta(days=1)
         else:
@@ -382,7 +387,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 if dt_p.astimezone(TZ_SYDNEY).date() != curr:
                     continue
 
-                t_utc = dt_p.astimezone(TZ_UTC).replace(
+                t_utc = dt_p.astimezone(datetime.UTC).replace(
                     minute=0, second=0, microsecond=0
                 )
 

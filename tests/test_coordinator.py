@@ -23,12 +23,13 @@ from custom_components.energy_locals.const import (
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     CONF_USERNAME,
+    TZ_SYDNEY,
 )
 from custom_components.energy_locals.coordinator import (
-    TZ_SYDNEY,
     EnergyLocalsCoordinator,
     UpdateFailed,
     _statistic_metadata,
+    _statistic_series_out_of_sync,
 )
 
 
@@ -61,6 +62,21 @@ def _usage_data(day, total=1.0):
         }
         for index in range(count)
     ]
+
+
+@pytest.mark.parametrize(
+    ("usage_start", "cost_start", "out_of_sync"),
+    [
+        (None, None, False),
+        (123.0, 123.0, False),
+        (123.0, None, True),
+        (None, 123.0, True),
+        (123.0, 456.0, True),
+    ],
+)
+def test_statistic_series_out_of_sync(usage_start, cost_start, out_of_sync):
+    """Paired usage and cost series rebuild when their last rows differ."""
+    assert _statistic_series_out_of_sync(usage_start, cost_start) is out_of_sync
 
 
 class TestEnergyLocalsCoordinator:

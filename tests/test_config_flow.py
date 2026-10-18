@@ -11,7 +11,6 @@ from custom_components.energy_locals.api import (
     EnergyLocalsAPIError,
     EnergyLocalsAuthError,
 )
-from custom_components.energy_locals.config_flow import TZ_SYDNEY
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
@@ -20,6 +19,7 @@ from custom_components.energy_locals.const import (
     CONF_START_DATE,
     CONF_USERNAME,
     DOMAIN,
+    TZ_SYDNEY,
 )
 
 

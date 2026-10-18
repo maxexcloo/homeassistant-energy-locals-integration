@@ -2,7 +2,6 @@
 
 import datetime
 import math
-from zoneinfo import ZoneInfo
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -28,6 +27,7 @@ from .const import (
     CONF_TARIFFS,
     CONF_USERNAME,
     DOMAIN,
+    TZ_SYDNEY,
 )
 from .tariffs import (
     TARIFF_EFFECTIVE_FROM,
@@ -35,8 +35,6 @@ from .tariffs import (
     tariff_for_date,
     upsert_tariff,
 )
-
-TZ_SYDNEY = ZoneInfo("Australia/Sydney")
 
 
 async def _async_validate_account(hass, username, password, account_id):
