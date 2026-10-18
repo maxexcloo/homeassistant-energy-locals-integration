@@ -11,6 +11,7 @@ from custom_components.energy_locals.api import (
     EnergyLocalsAPI,
     EnergyLocalsAPIError,
     EnergyLocalsAuthError,
+    EnergyLocalsRateLimitError,
 )
 
 
@@ -55,6 +56,16 @@ class EnergyLocalsAPITests(unittest.TestCase):
 
             with self.assertRaises(EnergyLocalsAccountError):
                 self.api.get_data(self.day)
+
+    def test_usage_rate_limit_reports_retry_after(self):
+        for header, retry_after in (({"Retry-After": "30"}, 30.0), ({}, None)):
+            with self.subTest(header=header), patch.object(requests, "post") as post:
+                self.api._token = "token"
+                post.return_value = Mock(headers=header, status_code=429)
+
+                with self.assertRaises(EnergyLocalsRateLimitError) as raised:
+                    self.api.get_data(self.day)
+                self.assertEqual(raised.exception.retry_after, retry_after)
 
     def test_usage_transport_failure_is_not_empty_data(self):
         with patch.object(requests, "post") as post:

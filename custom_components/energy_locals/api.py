@@ -25,6 +25,22 @@ class EnergyLocalsAuthError(EnergyLocalsAPIError):
     """Raised when Energy Locals rejects the configured credentials."""
 
 
+class EnergyLocalsRateLimitError(EnergyLocalsAPIError):
+    """Raised when Energy Locals asks the client to slow down."""
+
+    def __init__(self, message, retry_after=None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_after(resp):
+    """Return a Retry-After delay in seconds, ignoring HTTP-date values."""
+    try:
+        return max(0.0, float(resp.headers.get("Retry-After")))
+    except TypeError, ValueError:
+        return None
+
+
 class EnergyLocalsAPI:
     """Synchronous client for the Energy Locals MyAccount API."""
 
@@ -113,6 +129,10 @@ class EnergyLocalsAPI:
             if resp.status_code == 403:
                 raise EnergyLocalsAccountError(
                     "Energy Locals denied access to the utility account"
+                )
+            if resp.status_code == 429:
+                raise EnergyLocalsRateLimitError(
+                    "Energy Locals rate limited usage requests", _retry_after(resp)
                 )
 
             resp.raise_for_status()

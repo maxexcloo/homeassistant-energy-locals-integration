@@ -14,7 +14,10 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
 
-from custom_components.energy_locals.api import EnergyLocalsAPIError
+from custom_components.energy_locals.api import (
+    EnergyLocalsAPIError,
+    EnergyLocalsRateLimitError,
+)
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
@@ -291,6 +294,20 @@ class TestEnergyLocalsCoordinator:
         self.coordinator._async_clear_imported_statistics.assert_awaited_once()
         assert self.entry.data[CONF_ACCOUNT] == "123"
         assert CONF_RESET_STATISTICS not in self.entry.data
+
+    async def test_failed_requests_back_off_and_honour_retry_after(self):
+        self.api.get_data.side_effect = [
+            EnergyLocalsRateLimitError("slow down", retry_after=30.0),
+            EnergyLocalsAPIError("offline"),
+            _usage_data(self.day),
+        ]
+        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
+        with patch(
+            "custom_components.energy_locals.coordinator.asyncio.sleep"
+        ) as sleep:
+            result = await self.coordinator._perform_sync()
+        assert [call.args[0] for call in sleep.await_args_list] == [30.0, 4]
+        assert result["total_kwh"] == pytest.approx(1.0)
 
     async def test_zero_usage_history_remains_valid(self):
         self.api.get_data.return_value = _usage_data(self.day, total=0.0)
