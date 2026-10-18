@@ -163,6 +163,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 title=f"Energy Locals ({previous_account})",
                 unique_id=previous_account,
             )
+            # The API client and device were set up for the rejected account.
+            self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
             return
         self.hass.config_entries.async_update_entry(self.config_entry, data=data)
 
@@ -252,7 +254,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
     async def _perform_sync(self, *, force_rebuild=False):
         conf = self.config_entry.data
         start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
-        tariffs = normalise_tariffs(conf)
+        tariffs = normalise_tariffs(self.config_entry.options)
 
         account_id = self.config_entry.data[CONF_ACCOUNT]
         id_e, id_c = self._statistic_ids(account_id)

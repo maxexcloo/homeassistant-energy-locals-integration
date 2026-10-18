@@ -18,12 +18,12 @@ from custom_components.energy_locals.api import EnergyLocalsAPIError
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
-    CONF_PRICE_SUPPLY_DOLLARS,
-    CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
+    CONF_TARIFFS,
     CONF_USERNAME,
+    DOMAIN,
     TZ_SYDNEY,
 )
 from custom_components.energy_locals.coordinator import (
@@ -32,17 +32,23 @@ from custom_components.energy_locals.coordinator import (
     _statistic_metadata,
     _statistic_series_out_of_sync,
 )
+from custom_components.energy_locals.tariffs import upsert_tariff
 
 
-def _entry_data(start_date):
-    return {
-        CONF_ACCOUNT: "123",
-        CONF_PASSWORD: "secret",
-        CONF_PRICE_SUPPLY_DOLLARS: 0.94,
-        CONF_PRICE_USAGE_DOLLARS: 0.359,
-        CONF_START_DATE: start_date.isoformat(),
-        CONF_USERNAME: "user@example.com",
-    }
+def _entry(start_date):
+    """Return a current-version entry with one tariff from the start date."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_ACCOUNT: "123",
+            CONF_PASSWORD: "secret",
+            CONF_START_DATE: start_date.isoformat(),
+            CONF_USERNAME: "user@example.com",
+        },
+        options={CONF_TARIFFS: upsert_tariff([], start_date.isoformat(), 0.359, 0.94)},
+        unique_id="123",
+        version=3,
+    )
 
 
 def _usage_data(day, total=1.0, *, offset=True):
@@ -86,7 +92,7 @@ async def test_daylight_saving_end_imports_the_repeated_hour(hass, freezer, offs
     """Both 02:00 hours on the day daylight saving ends become separate rows."""
     day = datetime.date(2026, 4, 5)
     freezer.move_to("2026-04-06T12:00:00+10:00")
-    entry = MockConfigEntry(domain="energy_locals", data=_entry_data(day))
+    entry = _entry(day)
     entry.add_to_hass(hass)
     api = Mock()
     api.get_data.return_value = _usage_data(day, total=25.0, offset=offset)
@@ -111,7 +117,7 @@ class TestEnergyLocalsCoordinator:
         self.day = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
         self.api = Mock()
         self.hass = hass
-        self.entry = MockConfigEntry(domain="energy_locals", data=_entry_data(self.day))
+        self.entry = _entry(self.day)
         self.entry.add_to_hass(hass)
         self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)
         self.coordinator._async_validate_replacement = AsyncMock()
@@ -316,9 +322,7 @@ class TestRecorderRebuilds:
         self.recorder = recorder_mock
         self.day = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
         self.first_day = self.day - datetime.timedelta(days=1)
-        self.entry = MockConfigEntry(
-            domain="energy_locals", data=_entry_data(self.first_day)
-        )
+        self.entry = _entry(self.first_day)
         self.entry.add_to_hass(hass)
         self.api = Mock()
         self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)

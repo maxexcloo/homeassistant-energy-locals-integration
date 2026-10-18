@@ -10,6 +10,8 @@ from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
+    CONF_PRICE_SUPPLY_DOLLARS,
+    CONF_PRICE_USAGE_DOLLARS,
     CONF_TARIFFS,
     CONF_USERNAME,
 )
@@ -22,14 +24,23 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate a single-price entry to an effective-dated tariff schedule."""
-    if entry.version == 1:
+    """Move single prices and data-stored tariff schedules into options."""
+    if entry.version > 3:
+        return False
+    if entry.version < 3:
+        data = dict(entry.data)
+        tariffs = normalise_tariffs(data)
+        for key in (CONF_PRICE_SUPPLY_DOLLARS, CONF_PRICE_USAGE_DOLLARS, CONF_TARIFFS):
+            data.pop(key, None)
         hass.config_entries.async_update_entry(
             entry,
-            data={**entry.data, CONF_TARIFFS: normalise_tariffs(entry.data)},
-            version=2,
+            data=data,
+            options={**entry.options, CONF_TARIFFS: tariffs},
+            # Entries from the first release were created without a unique ID.
+            unique_id=entry.unique_id or data[CONF_ACCOUNT],
+            version=3,
         )
-        _LOGGER.info("Migrated Energy Locals tariff configuration to version 2")
+        _LOGGER.info("Migrated Energy Locals configuration to version 3")
     return True
 
 
@@ -54,16 +65,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    entry.async_on_unload(entry.add_update_listener(update_listener))
-
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload when config changes."""
-    await hass.config_entries.async_reload(entry.entry_id)

@@ -61,10 +61,15 @@ def _finite_non_negative_price(value):
     return price
 
 
+def _today():
+    """Return the current Sydney calendar date."""
+    return datetime.datetime.now(TZ_SYDNEY).date()
+
+
 class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energy Locals."""
 
-    VERSION = 2
+    VERSION = 3
 
     @staticmethod
     @callback
@@ -77,13 +82,9 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             await self.async_set_unique_id(user_input[CONF_ACCOUNT])
-            for entry in self._async_current_entries():
-                if entry.data.get(CONF_ACCOUNT) == user_input[CONF_ACCOUNT]:
-                    return self.async_abort(reason="already_configured")
             self._abort_if_unique_id_configured()
 
-            today = datetime.datetime.now(TZ_SYDNEY).date()
-            if datetime.date.fromisoformat(user_input[CONF_START_DATE]) > today:
+            if datetime.date.fromisoformat(user_input[CONF_START_DATE]) > _today():
                 errors["base"] = "start_date_future"
             else:
                 errors = await _async_validate_account(
@@ -93,15 +94,20 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_ACCOUNT],
                 )
                 if not errors:
-                    user_input[CONF_TARIFFS] = normalise_tariffs(user_input)
+                    data = dict(user_input)
+                    tariffs = upsert_tariff(
+                        [],
+                        data[CONF_START_DATE],
+                        data.pop(CONF_PRICE_USAGE_DOLLARS),
+                        data.pop(CONF_PRICE_SUPPLY_DOLLARS),
+                    )
                     return self.async_create_entry(
-                        title=f"Energy Locals ({user_input[CONF_ACCOUNT]})",
-                        data=user_input,
+                        title=f"Energy Locals ({data[CONF_ACCOUNT]})",
+                        data=data,
+                        options={CONF_TARIFFS: tariffs},
                     )
 
-        default_date = (
-            datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=30)
-        ).isoformat()
+        default_date = (_today() - datetime.timedelta(days=30)).isoformat()
 
         schema = vol.Schema(
             {
@@ -127,9 +133,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(self, user_input=None):
         """Validate and store replacement credentials."""
         errors = {}
-        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
-        if entry is None:
-            return self.async_abort(reason="reauth_entry_missing")
+        entry = self._get_reauth_entry()
 
         if user_input is not None:
             errors = await _async_validate_account(
@@ -159,92 +163,93 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm", data_schema=schema, errors=errors
         )
 
+    async def async_step_reconfigure(self, user_input=None):
+        """Change the utility account, import start date or rebuild from scratch."""
+        entry = self._get_reconfigure_entry()
+        errors = {}
 
-class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
-    """Manage account settings and effective-dated tariffs."""
+        if user_input is not None:
+            account_id = user_input[CONF_ACCOUNT]
+            account_changed = account_id != entry.data[CONF_ACCOUNT]
+            existing_entry = self.hass.config_entries.async_entry_for_domain_unique_id(
+                DOMAIN, account_id
+            )
+            start_date = datetime.date.fromisoformat(user_input[CONF_START_DATE])
+            try:
+                tariff_for_date(normalise_tariffs(entry.options), start_date)
+            except ValueError:
+                errors["base"] = "start_date_before_tariff"
+            if start_date > _today():
+                errors["base"] = "start_date_future"
+            if existing_entry and existing_entry.entry_id != entry.entry_id:
+                errors["base"] = "already_configured"
+            elif account_changed and not errors:
+                errors = await _async_validate_account(
+                    self.hass,
+                    entry.data[CONF_USERNAME],
+                    entry.data[CONF_PASSWORD],
+                    account_id,
+                )
+
+            if not errors:
+                data_updates = {
+                    CONF_ACCOUNT: account_id,
+                    CONF_START_DATE: user_input[CONF_START_DATE],
+                }
+                if account_changed or user_input[CONF_RESET_STATISTICS]:
+                    data_updates[CONF_RESET_ACCOUNT] = entry.data[CONF_ACCOUNT]
+                    data_updates[CONF_RESET_STATISTICS] = True
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates=data_updates,
+                    title=f"Energy Locals ({account_id})",
+                    unique_id=account_id,
+                )
+
+        data = user_input or entry.data
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_ACCOUNT, default=data[CONF_ACCOUNT]): cv.string,
+                vol.Required(
+                    CONF_START_DATE, default=data[CONF_START_DATE]
+                ): DateSelector(),
+                vol.Required(
+                    CONF_RESET_STATISTICS,
+                    default=bool(user_input and user_input[CONF_RESET_STATISTICS]),
+                ): cv.boolean,
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=schema, errors=errors
+        )
+
+
+class EnergyLocalsOptionsFlow(config_entries.OptionsFlowWithReload):
+    """Manage the effective-dated tariff schedule."""
 
     async def async_step_init(self, user_input=None):
-        errors = {}
+        tariffs = normalise_tariffs(self.config_entry.options)
         if user_input is not None:
-            form_data = dict(user_input)
-            user_input = dict(form_data)
-            title = f"Energy Locals ({user_input[CONF_ACCOUNT]})"
-            effective_date = user_input.pop(CONF_TARIFF_EFFECTIVE_DATE, "")
-            usage_price = user_input.pop(CONF_PRICE_USAGE_DOLLARS)
-            supply_price = user_input.pop(CONF_PRICE_SUPPLY_DOLLARS)
-            tariffs = normalise_tariffs(self.config_entry.data)
-            if effective_date:
+            effective_date = user_input[CONF_TARIFF_EFFECTIVE_DATE]
+            usage_price = user_input[CONF_PRICE_USAGE_DOLLARS]
+            supply_price = user_input[CONF_PRICE_SUPPLY_DOLLARS]
+            try:
+                effective = tariff_for_date(
+                    tariffs, datetime.date.fromisoformat(effective_date)
+                )
+            except ValueError:
+                effective = None
+            if effective is None or (
+                effective[CONF_PRICE_USAGE_DOLLARS],
+                effective[CONF_PRICE_SUPPLY_DOLLARS],
+            ) != (usage_price, supply_price):
                 tariffs = upsert_tariff(
                     tariffs, effective_date, usage_price, supply_price
                 )
+            return self.async_create_entry(data={CONF_TARIFFS: tariffs})
 
-            account_id = user_input[CONF_ACCOUNT]
-            duplicate = any(
-                entry.entry_id != self.config_entry.entry_id
-                and entry.data.get(CONF_ACCOUNT) == account_id
-                for entry in self.hass.config_entries.async_entries(DOMAIN)
-            )
-            if duplicate:
-                errors["base"] = "already_configured"
-
-            account_changed = account_id != self.config_entry.data.get(CONF_ACCOUNT)
-            if account_changed and not duplicate:
-                errors.update(
-                    await _async_validate_account(
-                        self.hass,
-                        self.config_entry.data[CONF_USERNAME],
-                        self.config_entry.data[CONF_PASSWORD],
-                        account_id,
-                    )
-                )
-
-            try:
-                start_date = datetime.date.fromisoformat(user_input[CONF_START_DATE])
-                tariff_for_date(
-                    tariffs,
-                    start_date,
-                )
-            except ValueError:
-                errors["base"] = "start_date_before_tariff"
-            else:
-                if start_date > datetime.datetime.now(TZ_SYDNEY).date():
-                    errors["base"] = "start_date_future"
-
-            if errors:
-                return self._show_options_form(form_data, tariffs, errors)
-
-            current_tariff = tariff_for_date(
-                tariffs, datetime.datetime.now(TZ_SYDNEY).date()
-            )
-            new_data = {
-                **self.config_entry.data,
-                **user_input,
-                CONF_TARIFFS: tariffs,
-                # Retain these keys for backwards compatibility with older releases.
-                CONF_PRICE_SUPPLY_DOLLARS: current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
-                CONF_PRICE_USAGE_DOLLARS: current_tariff[CONF_PRICE_USAGE_DOLLARS],
-            }
-            if account_changed or user_input.get(CONF_RESET_STATISTICS):
-                new_data[CONF_RESET_STATISTICS] = True
-                new_data[CONF_RESET_ACCOUNT] = self.config_entry.data.get(CONF_ACCOUNT)
-            self.hass.config_entries.async_update_entry(
-                self.config_entry,
-                data=new_data,
-                title=title,
-                unique_id=account_id,
-            )
-            return self.async_create_entry(title="", data={})
-
-        data = self.config_entry.data
-        tariffs = normalise_tariffs(data)
-        return self._show_options_form(data, tariffs, errors)
-
-    def _show_options_form(self, data, tariffs, errors):
-        """Show the options form with the supplied defaults and errors."""
-        current_tariff = tariff_for_date(
-            tariffs, datetime.datetime.now(TZ_SYDNEY).date()
-        )
-        prices = data if errors else current_tariff
+        today = _today()
+        current_tariff = tariff_for_date(tariffs, today)
         schedule = "\n".join(
             (
                 f"{item[TARIFF_EFFECTIVE_FROM]}: "
@@ -253,38 +258,23 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlow):
             )
             for item in tariffs
         )
-        effective_date_field = (
-            vol.Optional(
-                CONF_TARIFF_EFFECTIVE_DATE,
-                default=data[CONF_TARIFF_EFFECTIVE_DATE],
-            )
-            if data.get(CONF_TARIFF_EFFECTIVE_DATE)
-            else vol.Optional(CONF_TARIFF_EFFECTIVE_DATE)
-        )
         schema = vol.Schema(
             {
-                vol.Required(CONF_ACCOUNT, default=data.get(CONF_ACCOUNT)): cv.string,
-                vol.Required(
-                    CONF_START_DATE, default=data.get(CONF_START_DATE)
-                ): DateSelector(),
                 vol.Required(
                     CONF_PRICE_USAGE_DOLLARS,
-                    default=prices[CONF_PRICE_USAGE_DOLLARS],
+                    default=current_tariff[CONF_PRICE_USAGE_DOLLARS],
                 ): _finite_non_negative_price,
                 vol.Required(
                     CONF_PRICE_SUPPLY_DOLLARS,
-                    default=prices[CONF_PRICE_SUPPLY_DOLLARS],
+                    default=current_tariff[CONF_PRICE_SUPPLY_DOLLARS],
                 ): _finite_non_negative_price,
-                effective_date_field: DateSelector(),
-                vol.Optional(
-                    CONF_RESET_STATISTICS,
-                    default=data.get(CONF_RESET_STATISTICS, False),
-                ): cv.boolean,
+                vol.Required(
+                    CONF_TARIFF_EFFECTIVE_DATE, default=today.isoformat()
+                ): DateSelector(),
             }
         )
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
-            errors=errors,
             description_placeholders={"tariff_schedule": schedule},
         )

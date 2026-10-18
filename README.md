@@ -87,15 +87,20 @@ AGPL-3.0 - see [LICENSE](LICENSE).
 ## Updating Prices
 
 Go to **Settings → Devices & Services → Energy Locals → Configure** to add a
-tariff with its effective date, kWh rate, and daily supply charge. Future-dated
-tariffs become active automatically. Imports and rebuilds select the tariff that
-was active on each usage day, so later price changes do not alter earlier costs.
+tariff with its effective date, kWh rate, and daily supply charge. The effective
+date defaults to today. Future-dated tariffs become active automatically. Imports
+and rebuilds select the tariff that was active on each usage day, so later price
+changes do not alter earlier costs.
 
-Entering the same effective date again replaces that tariff period. Leave the
-effective-date field blank to keep the tariff schedule unchanged. If adding or
-correcting a tariff that is already in effect, press **Rebuild Statistics**
-afterwards to recalculate the affected historical cost.
+Entering the same effective date again replaces that tariff period. Submitting
+the prices already in effect on that date leaves the schedule unchanged. If
+adding or correcting a tariff that is already in effect, press **Rebuild
+Statistics** afterwards to recalculate the affected historical cost.
 
-Changing the utility account validates and rebuilds the new account, then removes
-statistics belonging to the old account. If replacement history cannot be staged,
-the account change is reverted and the old statistics remain untouched.
+## Changing the Account
+
+Use **Reconfigure** on the Energy Locals entry to change the utility account or
+import start date, or to clear imported statistics and rebuild them. Changing the
+utility account validates and rebuilds the new account, then removes statistics
+belonging to the old account. If replacement history cannot be staged, the
+account change is reverted and the old statistics remain untouched.
