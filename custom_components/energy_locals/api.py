@@ -4,9 +4,11 @@ import logging
 
 import requests
 
-from .const import DATA_URL_TEMPLATE, LOGIN_URL
+from .const import DATA_URL_TEMPLATE, LOGIN_URL, PORTAL_URL
 
 _LOGGER = logging.getLogger(__name__)
+
+_TIMEOUT = 30
 
 
 class EnergyLocalsAPIError(Exception):
@@ -35,8 +37,8 @@ class EnergyLocalsAPI:
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
-            "Origin": "https://urban.energylocals.com.au",
-            "Referer": "https://urban.energylocals.com.au/",
+            "Origin": PORTAL_URL,
+            "Referer": f"{PORTAL_URL}/",
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
         }
         if self._token:
@@ -50,7 +52,9 @@ class EnergyLocalsAPI:
             headers = self._get_headers()
             headers.pop("Authorization", None)
 
-            resp = requests.post(LOGIN_URL, json=payload, headers=headers, timeout=30)
+            resp = requests.post(
+                LOGIN_URL, json=payload, headers=headers, timeout=_TIMEOUT
+            )
             resp.raise_for_status()
 
             data = resp.json()
@@ -90,7 +94,7 @@ class EnergyLocalsAPI:
 
         try:
             resp = requests.post(
-                url, json=payload, headers=self._get_headers(), timeout=30
+                url, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
             )
 
             if resp.status_code == 401:
@@ -98,7 +102,7 @@ class EnergyLocalsAPI:
                 _LOGGER.info("Energy Locals token expired; authenticating again")
                 self.login()
                 resp = requests.post(
-                    url, json=payload, headers=self._get_headers(), timeout=30
+                    url, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
                 )
                 if resp.status_code == 401:
                     raise EnergyLocalsAuthError(

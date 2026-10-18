@@ -3,7 +3,7 @@
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ACCOUNT, DOMAIN
+from .const import CONF_ACCOUNT, DOMAIN, NAME, entry_title
 
 
 class EnergyLocalsEntity(CoordinatorEntity):
@@ -20,8 +20,8 @@ class EnergyLocalsEntity(CoordinatorEntity):
     def device_info(self) -> DeviceInfo:
         """Return the shared Energy Locals device information."""
         return DeviceInfo(
-            manufacturer="Energy Locals",
+            manufacturer=NAME,
             model="Utility Meter",
-            name=f"Energy Locals ({self._entry.data[CONF_ACCOUNT]})",
+            name=entry_title(self._entry.data[CONF_ACCOUNT]),
             identifiers={(DOMAIN, self._entry.entry_id)},
         )
