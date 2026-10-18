@@ -387,6 +387,45 @@ class TestRecorderRebuilds:
             {"state", "sum"},
         )
 
+    async def test_running_totals_continue_across_days_and_syncs(self, freezer):
+        """Each day adds to the previous total, including after a later sync."""
+        self.api.get_data.side_effect = [
+            _usage_data(self.first_day, total=1.0),
+            _usage_data(self.day, total=2.0),
+        ]
+        await self.coordinator._perform_sync()
+
+        freezer.move_to("2026-10-19T00:00:00+00:00")
+        next_day = self.day + datetime.timedelta(days=1)
+        self.api.get_data.side_effect = [_usage_data(next_day, total=4.0)]
+        await async_wait_recording_done(self.hass)
+        result = await self.coordinator._perform_sync()
+
+        after = await self._read_statistics()
+        # Rows are ordered, so each day keeps the sum from its last hour.
+        day_totals = {
+            statistic_id: {
+                datetime.datetime.fromtimestamp(row["start"], TZ_SYDNEY).date(): row[
+                    "sum"
+                ]
+                for row in rows
+            }
+            for statistic_id, rows in after.items()
+        }
+        assert day_totals[self.statistic_ids[0]] == pytest.approx(
+            {self.first_day: 1.0, self.day: 3.0, next_day: 7.0}
+        )
+        # Each day adds its usage at 0.359 per kWh plus the 0.94 supply charge.
+        assert day_totals[self.statistic_ids[1]] == pytest.approx(
+            {self.first_day: 1.299, self.day: 2.957, next_day: 5.333}
+        )
+        for rows in after.values():
+            assert len(rows) == 72
+            sums = [row["sum"] for row in rows]
+            assert sums == sorted(sums)
+        assert result["total_kwh"] == pytest.approx(7.0)
+        assert result["total_cost"] == pytest.approx(5.333)
+
     @pytest.mark.parametrize("force_rebuild", [False, True])
     @pytest.mark.parametrize("missing", ["day", "hour", "interval"])
     async def test_incomplete_rebuild_preserves_recorder_rows(
