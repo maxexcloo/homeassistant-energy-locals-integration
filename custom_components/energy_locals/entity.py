@@ -3,7 +3,7 @@
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_ACCOUNT, DOMAIN
 
 
 class EnergyLocalsEntity(CoordinatorEntity):
@@ -22,6 +22,6 @@ class EnergyLocalsEntity(CoordinatorEntity):
         return DeviceInfo(
             manufacturer="Energy Locals",
             model="Utility Meter",
-            name="Energy Locals",
+            name=f"Energy Locals ({self._entry.data[CONF_ACCOUNT]})",
             identifiers={(DOMAIN, self._entry.entry_id)},
         )
