@@ -26,8 +26,11 @@ from .const import (
     CONF_TARIFF_EFFECTIVE_DATE,
     CONF_TARIFFS,
     CONF_USERNAME,
+    DEFAULT_PRICE_SUPPLY_DOLLARS,
+    DEFAULT_PRICE_USAGE_DOLLARS,
     DOMAIN,
     TZ_SYDNEY,
+    entry_title,
 )
 from .tariffs import (
     TARIFF_EFFECTIVE_FROM,
@@ -102,7 +105,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data.pop(CONF_PRICE_SUPPLY_DOLLARS),
                     )
                     return self.async_create_entry(
-                        title=f"Energy Locals ({data[CONF_ACCOUNT]})",
+                        title=entry_title(data[CONF_ACCOUNT]),
                         data=data,
                         options={CONF_TARIFFS: tariffs},
                     )
@@ -116,10 +119,10 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_ACCOUNT): str,
                 vol.Required(CONF_START_DATE, default=default_date): DateSelector(),
                 vol.Required(
-                    CONF_PRICE_USAGE_DOLLARS, default=0.359
+                    CONF_PRICE_USAGE_DOLLARS, default=DEFAULT_PRICE_USAGE_DOLLARS
                 ): _finite_non_negative_price,
                 vol.Required(
-                    CONF_PRICE_SUPPLY_DOLLARS, default=0.94
+                    CONF_PRICE_SUPPLY_DOLLARS, default=DEFAULT_PRICE_SUPPLY_DOLLARS
                 ): _finite_non_negative_price,
             }
         )
@@ -202,7 +205,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates=data_updates,
-                    title=f"Energy Locals ({account_id})",
+                    title=entry_title(account_id),
                     unique_id=account_id,
                 )
 

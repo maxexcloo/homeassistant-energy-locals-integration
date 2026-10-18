@@ -39,7 +39,9 @@ from .const import (
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     DOMAIN,
+    NAME,
     TZ_SYDNEY,
+    entry_title,
 )
 from .tariffs import normalise_tariffs, tariff_for_date
 
@@ -47,6 +49,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # Wait for recent incomplete days; older gaps can be skipped on initial imports.
 _DATA_GRACE_DAYS = 3
+# Energy Locals reports usage in half-hour intervals.
+_INTERVAL = timedelta(minutes=30)
 
 
 def _statistic_series_out_of_sync(
@@ -160,7 +164,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
                 data=data,
-                title=f"Energy Locals ({previous_account})",
+                title=entry_title(previous_account),
                 unique_id=previous_account,
             )
             # The API client and device were set up for the rejected account.
@@ -226,8 +230,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             day + timedelta(days=1), datetime.time(), TZ_SYDNEY
         ).astimezone(datetime.UTC)
         return all(
-            start + timedelta(minutes=30 * index) in intervals
-            for index in range(int((end - start).total_seconds() / 1800))
+            start + index * _INTERVAL in intervals
+            for index in range((end - start) // _INTERVAL)
         )
 
     async def _async_update_data(self):
@@ -459,7 +463,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             async_add_external_statistics(
                 self.hass,
                 _statistic_metadata(
-                    name=f"Energy Locals Usage ({account_id})",
+                    name=f"{NAME} Usage ({account_id})",
                     statistic_id=id_e,
                     unit="kWh",
                     unit_class="energy",
@@ -471,7 +475,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             async_add_external_statistics(
                 self.hass,
                 _statistic_metadata(
-                    name=f"Energy Locals Cost ({account_id})",
+                    name=f"{NAME} Cost ({account_id})",
                     statistic_id=id_c,
                     unit="AUD",
                     unit_class=None,

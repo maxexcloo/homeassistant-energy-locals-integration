@@ -11,6 +11,8 @@ from .const import (
     CONF_PRICE_USAGE_DOLLARS,
     CONF_START_DATE,
     CONF_TARIFFS,
+    DEFAULT_PRICE_SUPPLY_DOLLARS,
+    DEFAULT_PRICE_USAGE_DOLLARS,
 )
 
 TARIFF_EFFECTIVE_FROM = "effective_from"
@@ -48,8 +50,8 @@ def normalise_tariffs(config: dict) -> list[dict]:
         tariffs = [
             _tariff(
                 config[CONF_START_DATE],
-                config.get(CONF_PRICE_USAGE_DOLLARS, 0.359),
-                config.get(CONF_PRICE_SUPPLY_DOLLARS, 0.94),
+                config.get(CONF_PRICE_USAGE_DOLLARS, DEFAULT_PRICE_USAGE_DOLLARS),
+                config.get(CONF_PRICE_SUPPLY_DOLLARS, DEFAULT_PRICE_SUPPLY_DOLLARS),
             )
         ]
 
