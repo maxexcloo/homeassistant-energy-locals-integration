@@ -69,7 +69,7 @@ entity IDs already stored in the entity registry.
 
 ## Installation
 
-Requires Home Assistant **2026.9.4 or newer**.
+Requires Home Assistant **2026.10.2 or newer**.
 
 ### HACS (Recommended)
 
