@@ -14,6 +14,7 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
 
+from custom_components.energy_locals.api import EnergyLocalsAPIError
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
@@ -256,6 +257,33 @@ class TestEnergyLocalsCoordinator:
         assert not self.coordinator._force_rebuild
         assert self.entry.data[CONF_ACCOUNT] == "old-account"
         assert CONF_RESET_ACCOUNT not in self.entry.data
+        assert CONF_RESET_STATISTICS not in self.entry.data
+
+    async def test_reset_stays_queued_after_a_connection_failure(self):
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={
+                **self.entry.data,
+                CONF_RESET_ACCOUNT: "old-account",
+                CONF_RESET_STATISTICS: True,
+            },
+        )
+        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
+        self.api.get_data.side_effect = EnergyLocalsAPIError("offline")
+        with (
+            patch("custom_components.energy_locals.coordinator.asyncio.sleep"),
+            pytest.raises(UpdateFailed),
+        ):
+            await self.coordinator._async_update_data()
+        assert self.entry.data[CONF_ACCOUNT] == "123"
+        assert self.entry.data[CONF_RESET_STATISTICS]
+
+        self.api.get_data.side_effect = None
+        self.api.get_data.return_value = _usage_data(self.day)
+        self.coordinator._async_clear_imported_statistics = AsyncMock()
+        await self.coordinator._async_update_data()
+        self.coordinator._async_clear_imported_statistics.assert_awaited_once()
+        assert self.entry.data[CONF_ACCOUNT] == "123"
         assert CONF_RESET_STATISTICS not in self.entry.data
 
     async def test_zero_usage_history_remains_valid(self):

@@ -25,7 +25,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
+from .api import (
+    EnergyLocalsAccountError,
+    EnergyLocalsAPI,
+    EnergyLocalsAPIError,
+    EnergyLocalsAuthError,
+)
 from .const import (
     CONF_ACCOUNT,
     CONF_PRICE_SUPPLY_DOLLARS,
@@ -229,14 +234,20 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         force_rebuild = self._force_rebuild
         self._force_rebuild = False
         reset_requested = bool(self.config_entry.data.get(CONF_RESET_STATISTICS))
-        rebuild_succeeded = False
         try:
             result = await self._perform_sync(force_rebuild=force_rebuild)
-            rebuild_succeeded = True
-            return result
-        finally:
-            if reset_requested:
-                self._consume_reset_request(rebuild_succeeded=rebuild_succeeded)
+        except UpdateFailed as err:
+            # Keep a reset queued through connection failures so it retries.
+            cause = err.__cause__
+            transient = isinstance(cause, EnergyLocalsAPIError) and not isinstance(
+                cause, EnergyLocalsAccountError
+            )
+            if reset_requested and not transient:
+                self._consume_reset_request(rebuild_succeeded=False)
+            raise
+        if reset_requested:
+            self._consume_reset_request(rebuild_succeeded=True)
+        return result
 
     async def _perform_sync(self, *, force_rebuild=False):
         conf = self.config_entry.data
