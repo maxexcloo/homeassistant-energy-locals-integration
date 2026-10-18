@@ -201,15 +201,13 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
 
     def _extract_value(self, point):
-        for key in ["y", "value", "val", "usage", "amount"]:
-            if key in point:
-                try:
-                    value = float(point[key])
-                except ValueError, TypeError:
-                    continue
-                if math.isfinite(value):
-                    return max(0.0, value)
-        raise ValueError("Usage interval did not contain a finite numeric value")
+        try:
+            value = float(point["y"])
+        except KeyError, ValueError, TypeError:
+            value = math.nan
+        if not math.isfinite(value):
+            raise ValueError("Usage interval did not contain a finite numeric value")
+        return max(0.0, value)
 
     def _is_day_complete(self, usage_data: list, day: datetime.date) -> bool:
         """Require every half-hour interval, including daylight saving transitions."""

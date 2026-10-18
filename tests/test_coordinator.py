@@ -120,6 +120,13 @@ class TestEnergyLocalsCoordinator:
             self.add_external_statistics = statistics
             yield
 
+    async def test_usage_values_come_from_the_chart_y_value(self):
+        assert self.coordinator._extract_value({"y": "1.5"}) == 1.5
+        assert self.coordinator._extract_value({"y": -1}) == 0.0
+        for point in ({"value": 1.0}, {"y": None}, {"y": "nan"}):
+            with pytest.raises(ValueError):
+                self.coordinator._extract_value(point)
+
     async def test_completeness_requires_the_requested_local_day(self):
         next_day = self.day + datetime.timedelta(days=1)
         data = _usage_data(next_day)
