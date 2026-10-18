@@ -14,7 +14,10 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
 
-from custom_components.energy_locals.api import EnergyLocalsAPIError
+from custom_components.energy_locals.api import (
+    EnergyLocalsAPIError,
+    EnergyLocalsRateLimitError,
+)
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
@@ -292,6 +295,20 @@ class TestEnergyLocalsCoordinator:
         assert self.entry.data[CONF_ACCOUNT] == "123"
         assert CONF_RESET_STATISTICS not in self.entry.data
 
+    async def test_failed_requests_back_off_and_honour_retry_after(self):
+        self.api.get_data.side_effect = [
+            EnergyLocalsRateLimitError("slow down", retry_after=30.0),
+            EnergyLocalsAPIError("offline"),
+            _usage_data(self.day),
+        ]
+        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
+        with patch(
+            "custom_components.energy_locals.coordinator.asyncio.sleep"
+        ) as sleep:
+            result = await self.coordinator._perform_sync()
+        assert [call.args[0] for call in sleep.await_args_list] == [30.0, 4]
+        assert result["total_kwh"] == pytest.approx(1.0)
+
     async def test_zero_usage_history_remains_valid(self):
         self.api.get_data.return_value = _usage_data(self.day, total=0.0)
         self.coordinator._get_db_total = AsyncMock(
@@ -369,6 +386,45 @@ class TestRecorderRebuilds:
             None,
             {"state", "sum"},
         )
+
+    async def test_running_totals_continue_across_days_and_syncs(self, freezer):
+        """Each day adds to the previous total, including after a later sync."""
+        self.api.get_data.side_effect = [
+            _usage_data(self.first_day, total=1.0),
+            _usage_data(self.day, total=2.0),
+        ]
+        await self.coordinator._perform_sync()
+
+        freezer.move_to("2026-10-19T00:00:00+00:00")
+        next_day = self.day + datetime.timedelta(days=1)
+        self.api.get_data.side_effect = [_usage_data(next_day, total=4.0)]
+        await async_wait_recording_done(self.hass)
+        result = await self.coordinator._perform_sync()
+
+        after = await self._read_statistics()
+        # Rows are ordered, so each day keeps the sum from its last hour.
+        day_totals = {
+            statistic_id: {
+                datetime.datetime.fromtimestamp(row["start"], TZ_SYDNEY).date(): row[
+                    "sum"
+                ]
+                for row in rows
+            }
+            for statistic_id, rows in after.items()
+        }
+        assert day_totals[self.statistic_ids[0]] == pytest.approx(
+            {self.first_day: 1.0, self.day: 3.0, next_day: 7.0}
+        )
+        # Each day adds its usage at 0.359 per kWh plus the 0.94 supply charge.
+        assert day_totals[self.statistic_ids[1]] == pytest.approx(
+            {self.first_day: 1.299, self.day: 2.957, next_day: 5.333}
+        )
+        for rows in after.values():
+            assert len(rows) == 72
+            sums = [row["sum"] for row in rows]
+            assert sums == sorted(sums)
+        assert result["total_kwh"] == pytest.approx(7.0)
+        assert result["total_cost"] == pytest.approx(5.333)
 
     @pytest.mark.parametrize("force_rebuild", [False, True])
     @pytest.mark.parametrize("missing", ["day", "hour", "interval"])

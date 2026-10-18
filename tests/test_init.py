@@ -1,9 +1,11 @@
 """Tests for Energy Locals setup, unload and migration."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.energy_locals import async_migrate_entry
@@ -130,19 +132,29 @@ async def test_setup_login_failures(hass, failure, state, reauth):
 
 
 async def test_setup_and_unload(hass):
-    """Setup stores the coordinator on the entry and unload removes entities."""
+    """Setup finishes before the history import and unload removes entities."""
     entry = _entry(hass)
+    release = asyncio.Event()
+
+    async def perform_sync(_coordinator, *, force_rebuild):
+        await release.wait()
+        return {"total_kwh": 1.0}
+
     with (
         patch("custom_components.energy_locals.EnergyLocalsAPI") as api,
         patch(
             "custom_components.energy_locals.EnergyLocalsCoordinator._perform_sync",
-            new=AsyncMock(return_value={"total_kwh": 1.0}),
+            new=perform_sync,
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         api.assert_called_once_with("user@example.com", "secret", "123")
         assert entry.state is ConfigEntryState.LOADED
+        assert hass.states.get("sensor.energy_locals_123_usage").state == "unknown"
+
+        release.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
         coordinator = entry.runtime_data
         assert coordinator.config_entry is entry
         assert coordinator._listeners
@@ -153,3 +165,19 @@ async def test_setup_and_unload(hass):
     assert entry.state is ConfigEntryState.NOT_LOADED
     assert not coordinator._listeners
     assert hass.states.get("sensor.energy_locals_123_usage").state == "unavailable"
+
+
+async def test_background_import_auth_failure_starts_reauth(hass):
+    """Credentials rejected during the history import still start reauthentication."""
+    entry = _entry(hass)
+    with (
+        patch("custom_components.energy_locals.EnergyLocalsAPI"),
+        patch(
+            "custom_components.energy_locals.EnergyLocalsCoordinator._perform_sync",
+            new=AsyncMock(side_effect=ConfigEntryAuthFailed("rejected")),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN)
