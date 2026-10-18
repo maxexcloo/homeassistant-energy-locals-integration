@@ -73,6 +73,7 @@ async def test_entities_use_documented_ids_and_report_sync_data(hass):
         assert hass.states.get("sensor.energy_locals_123_usage").state == "unknown"
         price = hass.states.get("sensor.energy_locals_123_usage_price")
         assert price.state == "0.359"
+        assert price.attributes["unit_of_measurement"] == "AUD/kWh"
 
         await hass.services.async_call(
             "button",

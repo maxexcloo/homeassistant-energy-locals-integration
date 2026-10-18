@@ -40,7 +40,7 @@ SENSORS = (
     EnergyLocalsSensorEntityDescription(
         key="price",
         translation_key="usage_price",
-        native_unit_of_measurement="$/kWh",
+        native_unit_of_measurement="AUD/kWh",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: data.get("price"),
     ),

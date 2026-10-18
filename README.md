@@ -57,7 +57,7 @@ entity IDs already stored in the entity registry.
 | `sensor.energy_locals_<account>_cost`               | Cumulative cost in AUD                       |
 | `sensor.energy_locals_<account>_last_synced`        | Timestamp of last successful sync            |
 | `sensor.energy_locals_<account>_usage`              | Cumulative kWh total                         |
-| `sensor.energy_locals_<account>_usage_price`        | Configured rate ($/kWh)                      |
+| `sensor.energy_locals_<account>_usage_price`        | Configured rate (AUD/kWh)                    |
 
 ## Features
 
