@@ -22,15 +22,31 @@ class EnergyLocalsAPITests(unittest.TestCase):
         self.day = datetime.date(2026, 8, 8)
 
     def test_login_rejects_invalid_credentials(self):
+        for status_code in (400, 401, 403):
+            with (
+                self.subTest(status_code=status_code),
+                patch.object(requests, "post") as post,
+            ):
+                response = Mock(status_code=status_code)
+                response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+                    response=response
+                )
+                post.return_value = response
+
+                with self.assertRaises(EnergyLocalsAuthError):
+                    self.api.login()
+
+    def test_login_server_error_is_not_an_auth_failure(self):
         with patch.object(requests, "post") as post:
-            response = Mock(status_code=401)
+            response = Mock(status_code=500)
             response.raise_for_status.side_effect = requests.exceptions.HTTPError(
                 response=response
             )
             post.return_value = response
 
-            with self.assertRaises(EnergyLocalsAuthError):
+            with self.assertRaises(EnergyLocalsAPIError) as raised:
                 self.api.login()
+            self.assertNotIsInstance(raised.exception, EnergyLocalsAuthError)
 
     def test_usage_rejects_inaccessible_account(self):
         with patch.object(requests, "post") as post:
