@@ -94,7 +94,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(hours=12),
+            update_interval=timedelta(hours=6),
         )
         self.api = api
         self.entry = entry
@@ -230,17 +230,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # so a button press during an API await remains queued for the next one.
         force_rebuild = self._force_rebuild
         self._force_rebuild = False
-        now_hour = datetime.datetime.now(TZ_SYDNEY).hour
-        is_initial_run = self.data is None
-
         reset_requested = bool(self.entry.data.get(CONF_RESET_STATISTICS))
-        should_run = (
-            force_rebuild or reset_requested or is_initial_run or (now_hour >= 12)
-        )
-
-        if not should_run:
-            return self.data
-
         rebuild_succeeded = False
         try:
             result = await self._perform_sync(force_rebuild=force_rebuild)
