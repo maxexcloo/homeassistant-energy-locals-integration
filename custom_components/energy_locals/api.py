@@ -8,6 +8,8 @@ from .const import DATA_URL_TEMPLATE, LOGIN_URL, PORTAL_URL
 
 _LOGGER = logging.getLogger(__name__)
 
+# Energy Locals may answer a wrong password with a validation error.
+_AUTH_STATUSES = (400, 401, 403)
 _TIMEOUT = 30
 
 
@@ -21,6 +23,22 @@ class EnergyLocalsAccountError(EnergyLocalsAPIError):
 
 class EnergyLocalsAuthError(EnergyLocalsAPIError):
     """Raised when Energy Locals rejects the configured credentials."""
+
+
+class EnergyLocalsRateLimitError(EnergyLocalsAPIError):
+    """Raised when Energy Locals asks the client to slow down."""
+
+    def __init__(self, message, retry_after=None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_after(resp):
+    """Return a Retry-After delay in seconds, ignoring HTTP-date values."""
+    try:
+        return max(0.0, float(resp.headers.get("Retry-After")))
+    except TypeError, ValueError:
+        return None
 
 
 class EnergyLocalsAPI:
@@ -66,7 +84,7 @@ class EnergyLocalsAPI:
             self._token = token
             return True
         except requests.exceptions.HTTPError as err:
-            if err.response is not None and err.response.status_code in (401, 403):
+            if err.response is not None and err.response.status_code in _AUTH_STATUSES:
                 raise EnergyLocalsAuthError(
                     "Invalid Energy Locals credentials"
                 ) from err
@@ -111,6 +129,10 @@ class EnergyLocalsAPI:
             if resp.status_code == 403:
                 raise EnergyLocalsAccountError(
                     "Energy Locals denied access to the utility account"
+                )
+            if resp.status_code == 429:
+                raise EnergyLocalsRateLimitError(
+                    "Energy Locals rate limited usage requests", _retry_after(resp)
                 )
 
             resp.raise_for_status()

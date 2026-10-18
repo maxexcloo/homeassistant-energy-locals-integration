@@ -14,6 +14,7 @@ from .const import (
     CONF_PRICE_USAGE_DOLLARS,
     CONF_TARIFFS,
     CONF_USERNAME,
+    DOMAIN,
 )
 from .coordinator import EnergyLocalsCoordinator
 from .tariffs import normalise_tariffs
@@ -59,11 +60,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady("Unable to connect to Energy Locals") from err
 
     coordinator = EnergyLocalsCoordinator(hass, api, entry)
-
-    await coordinator.async_config_entry_first_refresh()
-
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # A first import or rebuild can span years of history, so run it after setup.
+    entry.async_create_background_task(
+        hass, coordinator.async_refresh(), f"{DOMAIN} history import"
+    )
 
     return True
 

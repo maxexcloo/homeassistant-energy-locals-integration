@@ -40,6 +40,9 @@ Go to **Settings → Devices & Services → Add Integration** and search for **E
 | Price Per kWh       | Your usage rate in AUD (e.g. `0.359`)            |
 | Daily Supply Charge | Daily fixed charge in AUD (e.g. `0.94`)          |
 
+History imports in the background after setup, so a long first import does not
+delay Home Assistant. The sensors show values once it finishes.
+
 To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network, and look for a request to `/utility-accounts/{id}/usage-chart`.
 
 ## Updating Prices

@@ -11,6 +11,7 @@ from custom_components.energy_locals.api import (
     EnergyLocalsAPI,
     EnergyLocalsAPIError,
     EnergyLocalsAuthError,
+    EnergyLocalsRateLimitError,
 )
 
 
@@ -22,15 +23,31 @@ class EnergyLocalsAPITests(unittest.TestCase):
         self.day = datetime.date(2026, 8, 8)
 
     def test_login_rejects_invalid_credentials(self):
+        for status_code in (400, 401, 403):
+            with (
+                self.subTest(status_code=status_code),
+                patch.object(requests, "post") as post,
+            ):
+                response = Mock(status_code=status_code)
+                response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+                    response=response
+                )
+                post.return_value = response
+
+                with self.assertRaises(EnergyLocalsAuthError):
+                    self.api.login()
+
+    def test_login_server_error_is_not_an_auth_failure(self):
         with patch.object(requests, "post") as post:
-            response = Mock(status_code=401)
+            response = Mock(status_code=500)
             response.raise_for_status.side_effect = requests.exceptions.HTTPError(
                 response=response
             )
             post.return_value = response
 
-            with self.assertRaises(EnergyLocalsAuthError):
+            with self.assertRaises(EnergyLocalsAPIError) as raised:
                 self.api.login()
+            self.assertNotIsInstance(raised.exception, EnergyLocalsAuthError)
 
     def test_usage_rejects_inaccessible_account(self):
         with patch.object(requests, "post") as post:
@@ -39,6 +56,16 @@ class EnergyLocalsAPITests(unittest.TestCase):
 
             with self.assertRaises(EnergyLocalsAccountError):
                 self.api.get_data(self.day)
+
+    def test_usage_rate_limit_reports_retry_after(self):
+        for header, retry_after in (({"Retry-After": "30"}, 30.0), ({}, None)):
+            with self.subTest(header=header), patch.object(requests, "post") as post:
+                self.api._token = "token"
+                post.return_value = Mock(headers=header, status_code=429)
+
+                with self.assertRaises(EnergyLocalsRateLimitError) as raised:
+                    self.api.get_data(self.day)
+                self.assertEqual(raised.exception.retry_after, retry_after)
 
     def test_usage_transport_failure_is_not_empty_data(self):
         with patch.object(requests, "post") as post:

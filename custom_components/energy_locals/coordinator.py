@@ -30,6 +30,7 @@ from .api import (
     EnergyLocalsAPI,
     EnergyLocalsAPIError,
     EnergyLocalsAuthError,
+    EnergyLocalsRateLimitError,
 )
 from .const import (
     CONF_ACCOUNT,
@@ -51,6 +52,10 @@ _LOGGER = logging.getLogger(__name__)
 _DATA_GRACE_DAYS = 3
 # Energy Locals reports usage in half-hour intervals.
 _INTERVAL = timedelta(minutes=30)
+# Retry each day's request with doubling delays, honouring a bounded Retry-After.
+_RETRY_ATTEMPTS = 3
+_RETRY_DELAY = 2
+_RETRY_MAX_DELAY = 60
 
 
 def _statistic_series_out_of_sync(
@@ -332,24 +337,25 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         while curr < today_syd:
             usage_data = []
 
-            for attempt in range(1, 4):
-                if attempt > 1:
-                    await asyncio.sleep(2)
+            for attempt in range(_RETRY_ATTEMPTS):
                 try:
-                    data = await self.hass.async_add_executor_job(
+                    usage_data = await self.hass.async_add_executor_job(
                         self.api.get_data, curr
                     )
-                    usage_data = data
                     break
                 except EnergyLocalsAuthError as err:
                     raise ConfigEntryAuthFailed(
                         "Energy Locals credentials are no longer valid"
                     ) from err
                 except EnergyLocalsAPIError as err:
-                    if attempt == 3:
+                    if attempt == _RETRY_ATTEMPTS - 1:
                         raise UpdateFailed(
                             f"Unable to fetch Energy Locals data for {curr}"
                         ) from err
+                    delay = _RETRY_DELAY * 2**attempt
+                    if isinstance(err, EnergyLocalsRateLimitError) and err.retry_after:
+                        delay = err.retry_after
+                    await asyncio.sleep(min(delay, _RETRY_MAX_DELAY))
 
             days_old = (today_syd - curr).days
             within_grace = days_old <= _DATA_GRACE_DAYS
