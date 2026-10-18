@@ -93,11 +93,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(hours=6),
         )
         self.api = api
-        self.entry = entry
         self._force_rebuild = False
 
     def _statistic_ids(self, account_id):
@@ -141,9 +141,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
     def _consume_reset_request(self, *, rebuild_succeeded: bool):
         """Remove one-shot reset state after its rebuild attempt finishes."""
-        if not self.entry.data.get(CONF_RESET_STATISTICS):
+        if not self.config_entry.data.get(CONF_RESET_STATISTICS):
             return
-        data = dict(self.entry.data)
+        data = dict(self.config_entry.data)
         previous_account = data.pop(CONF_RESET_ACCOUNT, None)
         data.pop(CONF_RESET_STATISTICS, None)
         if (
@@ -153,13 +153,13 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         ):
             data[CONF_ACCOUNT] = previous_account
             self.hass.config_entries.async_update_entry(
-                self.entry,
+                self.config_entry,
                 data=data,
                 title=f"Energy Locals ({previous_account})",
                 unique_id=previous_account,
             )
             return
-        self.hass.config_entries.async_update_entry(self.entry, data=data)
+        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
 
     async def _get_db_total(self, statistic_id):
         try:
@@ -228,7 +228,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # so a button press during an API await remains queued for the next one.
         force_rebuild = self._force_rebuild
         self._force_rebuild = False
-        reset_requested = bool(self.entry.data.get(CONF_RESET_STATISTICS))
+        reset_requested = bool(self.config_entry.data.get(CONF_RESET_STATISTICS))
         rebuild_succeeded = False
         try:
             result = await self._perform_sync(force_rebuild=force_rebuild)
@@ -239,11 +239,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 self._consume_reset_request(rebuild_succeeded=rebuild_succeeded)
 
     async def _perform_sync(self, *, force_rebuild=False):
-        conf = self.entry.data
+        conf = self.config_entry.data
         start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
         tariffs = normalise_tariffs(conf)
 
-        account_id = self.entry.data[CONF_ACCOUNT]
+        account_id = self.config_entry.data[CONF_ACCOUNT]
         id_e, id_c = self._statistic_ids(account_id)
         reset_requested = bool(conf.get(CONF_RESET_STATISTICS))
 

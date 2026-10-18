@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 
-from .const import DOMAIN
 from .entity import EnergyLocalsEntity
 
 
@@ -56,7 +55,7 @@ SENSORS = (
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities(
         EnergyLocalsSensor(coordinator, entry, description) for description in SENSORS
     )
