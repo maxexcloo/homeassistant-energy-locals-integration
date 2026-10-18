@@ -53,6 +53,26 @@ def _statistic_series_out_of_sync(
     return usage_start is not None and usage_start != cost_start
 
 
+def _interval_starts(usage_data: list) -> list[tuple[dict, datetime.datetime]]:
+    """Return each interval with its UTC start, skipping malformed points."""
+    intervals = []
+    seen = set()
+    for point in usage_data:
+        try:
+            start = datetime.datetime.fromisoformat(point["dateValue"])
+        except KeyError, ValueError, TypeError:
+            _LOGGER.debug("Skipping malformed data point: %s", point)
+            continue
+        if not start.tzinfo:
+            # Sydney wall times repeat when daylight saving ends. Without an
+            # offset only order separates them: a repeat is the standard-time one.
+            local_start = start.replace(tzinfo=TZ_SYDNEY, fold=int(start in seen))
+            seen.add(start)
+            start = local_start
+        intervals.append((point, start.astimezone(datetime.UTC)))
+    return intervals
+
+
 def _statistic_metadata(
     *, name: str, statistic_id: str, unit: str, unit_class: str | None
 ) -> StatisticMetaData:
@@ -193,15 +213,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
     def _is_day_complete(self, usage_data: list, day: datetime.date) -> bool:
         """Require every half-hour interval, including daylight saving transitions."""
-        intervals = set()
-        for p in usage_data:
-            try:
-                dt = datetime.datetime.fromisoformat(p["dateValue"])
-                if not dt.tzinfo:
-                    dt = dt.replace(tzinfo=TZ_SYDNEY, fold=1)
-                intervals.add(dt.astimezone(datetime.UTC))
-            except KeyError, ValueError, TypeError:
-                continue
+        intervals = {start for _point, start in _interval_starts(usage_data)}
         start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
             datetime.UTC
         )
@@ -374,22 +386,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             buckets = {}
             day_tariff = tariff_for_date(tariffs, curr)
 
-            for p in usage_data:
-                try:
-                    dt_p = datetime.datetime.fromisoformat(p["dateValue"])
-                except KeyError, ValueError, TypeError:
-                    _LOGGER.debug("Skipping malformed data point: %s", p)
+            for p, start in _interval_starts(usage_data):
+                if start.astimezone(TZ_SYDNEY).date() != curr:
                     continue
 
-                if not dt_p.tzinfo:
-                    dt_p = dt_p.replace(tzinfo=TZ_SYDNEY, fold=1)
-
-                if dt_p.astimezone(TZ_SYDNEY).date() != curr:
-                    continue
-
-                t_utc = dt_p.astimezone(datetime.UTC).replace(
-                    minute=0, second=0, microsecond=0
-                )
+                t_utc = start.replace(minute=0, second=0, microsecond=0)
 
                 if t_utc not in buckets:
                     buckets[t_utc] = {"cost": 0.0, "kwh": 0.0}

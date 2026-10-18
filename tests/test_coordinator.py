@@ -44,8 +44,8 @@ def _entry_data(start_date):
     }
 
 
-def _usage_data(day, total=1.0):
-    """Build a full local day of offset-aware half-hour readings."""
+def _usage_data(day, total=1.0, *, offset=True):
+    """Build a full local day of half-hour readings, optionally without offsets."""
     start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
         datetime.UTC
     )
@@ -57,6 +57,7 @@ def _usage_data(day, total=1.0):
         {
             "dateValue": (start + datetime.timedelta(minutes=30 * index))
             .astimezone(TZ_SYDNEY)
+            .replace(tzinfo=None if not offset else TZ_SYDNEY)
             .isoformat(),
             "y": total / count,
         }
@@ -77,6 +78,27 @@ def _usage_data(day, total=1.0):
 def test_statistic_series_out_of_sync(usage_start, cost_start, out_of_sync):
     """Paired usage and cost series rebuild when their last rows differ."""
     assert _statistic_series_out_of_sync(usage_start, cost_start) is out_of_sync
+
+
+@pytest.mark.parametrize("offset", [False, True])
+async def test_daylight_saving_end_imports_the_repeated_hour(hass, freezer, offset):
+    """Both 02:00 hours on the day daylight saving ends become separate rows."""
+    day = datetime.date(2026, 4, 5)
+    freezer.move_to("2026-04-06T12:00:00+10:00")
+    entry = MockConfigEntry(domain="energy_locals", data=_entry_data(day))
+    entry.add_to_hass(hass)
+    api = Mock()
+    api.get_data.return_value = _usage_data(day, total=25.0, offset=offset)
+    coordinator = EnergyLocalsCoordinator(hass, api, entry)
+    coordinator._get_db_total = AsyncMock(side_effect=[(None, None), (None, None)])
+    with patch(
+        "custom_components.energy_locals.coordinator.async_add_external_statistics"
+    ) as add_statistics:
+        result = await coordinator._perform_sync()
+    usage = add_statistics.call_args_list[0].args[2]
+    assert len(usage) == 25
+    assert len({row["start"] for row in usage}) == 25
+    assert result["total_kwh"] == pytest.approx(25.0)
 
 
 class TestEnergyLocalsCoordinator:
@@ -112,8 +134,11 @@ class TestEnergyLocalsCoordinator:
             (datetime.date(2026, 10, 17), 48),
         ],
     )
-    async def test_completeness_accounts_for_daylight_saving(self, day, interval_count):
-        data = _usage_data(day)
+    @pytest.mark.parametrize("offset", [False, True])
+    async def test_completeness_accounts_for_daylight_saving(
+        self, day, interval_count, offset
+    ):
+        data = _usage_data(day, offset=offset)
         assert len(data) == interval_count
         assert self.coordinator._is_day_complete(data, day)
         data.pop(interval_count // 2)
