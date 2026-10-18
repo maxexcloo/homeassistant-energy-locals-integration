@@ -10,6 +10,7 @@
       "cannot_connect": "Failed to connect to Energy Locals. Try again later.",
       "invalid_account": "The utility account could not be accessed with these credentials.",
       "invalid_auth": "Invalid authentication.",
+      "invalid_price": "Prices must be finite numbers of zero or more.",
       "start_date_before_tariff": "The import start date must be on or after the first configured tariff.",
       "start_date_future": "The import start date cannot be in the future."
     },
@@ -67,6 +68,9 @@
     }
   },
   "options": {
+    "error": {
+      "invalid_price": "Prices must be finite numbers of zero or more."
+    },
     "step": {
       "init": {
         "title": "Update Energy Locals Tariffs",
