@@ -3,6 +3,7 @@
 import datetime
 from unittest.mock import AsyncMock, patch
 
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -66,6 +67,11 @@ async def test_entities_use_documented_ids_and_report_sync_data(hass):
             "sensor.energy_locals_123_usage",
             "sensor.energy_locals_123_usage_price",
         }
+        (device,) = dr.async_entries_for_config_entry(
+            dr.async_get(hass), entry.entry_id
+        )
+        assert device.entry_type is dr.DeviceEntryType.SERVICE
+        assert device.name == "Energy Locals (123)"
         assert hass.states.get("sensor.energy_locals_123_cost").state == "12.35"
         assert hass.states.get("sensor.energy_locals_123_last_synced").state == (
             synced.isoformat()
