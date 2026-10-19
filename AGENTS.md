@@ -22,8 +22,9 @@
   `energy_locals:account_<id>_cost` stable.
 - Keep config entry data, entity unique IDs and entity names stable unless a
   config entry migration is included.
-- Keep the `hacs.json` minimum Home Assistant version equal to the version pinned
-  by `pytest-homeassistant-custom-component`; raise them together.
+- Keep the `hacs.json` minimum Home Assistant version equal to the `homeassistant`
+  test pin, which must match `pytest-homeassistant-custom-component`; Renovate
+  raises them together.
 
 ## Changes
 
