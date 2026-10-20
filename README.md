@@ -1,19 +1,19 @@
-# Energy Locals — Home Assistant Integration
+# Energy Locals Home Assistant Integration
 
-Imports interval usage data from [Energy Locals Urban](https://urban.energylocals.com.au/) into Home Assistant's long-term statistics, enabling the Energy Dashboard to display historical electricity consumption and cost.
+Imports interval usage data from [Energy Locals Urban](https://urban.energylocals.com.au/) into Home Assistant's long-term statistics, so the Energy Dashboard can show historical electricity use and cost.
 
 ## Features
 
-- Automatic inconsistency detection and safe rebuilds
-- Effective-dated tariffs, so price changes only affect usage from their effective date
-- Half-hourly interval data imported as hourly long-term statistics
-- Manual non-destructive statistics rebuild button that preserves existing history if replacement data is incomplete
+- Detects inconsistent statistics and rebuilds them safely
+- Tariffs with effective dates, so a price change only affects usage from that date
+- Imports half-hourly interval data as hourly long-term statistics
+- A rebuild button that keeps existing history if the replacement data is incomplete
 - Supports multiple accounts
-- Tracks cumulative kWh usage and cost (with configurable daily supply charge)
+- Tracks cumulative kWh usage and cost, with a configurable daily supply charge
 
 ## Installation
 
-Requires Home Assistant **2026.10.2 or newer**.
+Requires Home Assistant 2026.10.2 or newer.
 
 ### HACS (Recommended)
 
@@ -25,7 +25,7 @@ Requires Home Assistant **2026.10.2 or newer**.
 
 ### Manual
 
-Copy the `custom_components/energy_locals/` folder into your HA `config/custom_components/` directory and restart.
+Copy the `custom_components/energy_locals/` folder into your Home Assistant `config/custom_components/` directory and restart.
 
 ## Configuration
 
@@ -40,35 +40,35 @@ Go to **Settings → Devices & Services → Add Integration** and search for **E
 | Price Per kWh       | Your usage rate in AUD (e.g. `0.359`)            |
 | Daily Supply Charge | Daily fixed charge in AUD (e.g. `0.94`)          |
 
-History imports in the background after setup, so a long first import does not
-delay Home Assistant. The sensors show values once it finishes.
+History imports in the background after setup, so a long first import doesn't
+hold up Home Assistant. The sensors show values once it finishes.
 
-To find your **Utility Account ID**: log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network, and look for a request to `/utility-accounts/{id}/usage-chart`.
+To find your Utility Account ID, log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network and look for a request to `/utility-accounts/{id}/usage-chart`.
 
 ## Updating Prices
 
 Go to **Settings → Devices & Services → Energy Locals → Configure** to add a
-tariff with its effective date, kWh rate, and daily supply charge. The effective
-date defaults to today. Future-dated tariffs become active automatically. Imports
-and rebuilds select the tariff that was active on each usage day, so later price
-changes do not alter earlier costs.
+tariff with its effective date, kWh rate and daily supply charge. The effective
+date defaults to today, and future-dated tariffs kick in automatically. Imports
+and rebuilds use the tariff that was active on each usage day, so later price
+changes don't alter earlier costs.
 
 Entering the same effective date again replaces that tariff period. Submitting
-the prices already in effect on that date leaves the schedule unchanged. If
-adding or correcting a tariff that is already in effect, press **Rebuild
-Statistics** afterwards to recalculate the affected historical cost.
+the prices already in effect on that date changes nothing. If you add or correct
+a tariff that's already in effect, press **Rebuild Statistics** afterwards to
+recalculate the affected historical cost.
 
 ## Changing the Account
 
 Use **Reconfigure** on the Energy Locals entry to change the utility account or
 import start date, or to clear imported statistics and rebuild them. Changing the
-utility account validates and rebuilds the new account, then removes statistics
-belonging to the old account. If replacement history cannot be staged, the
-account change is reverted and the old statistics remain untouched.
+utility account validates and rebuilds the new account, then removes the old
+account's statistics. If the replacement history can't be staged, the account
+change is reverted and the old statistics are left alone.
 
 ## Energy Dashboard Setup
 
-Because this integration imports statistics directly (not via sensor state changes), you need to add them manually to the Energy Dashboard:
+The integration imports statistics directly instead of through sensor state changes, so you need to add them to the Energy Dashboard by hand:
 
 1. Go to **Settings → Dashboards → Energy**
 2. Under **Electricity Grid → Grid Consumption**, click **Add Consumption**
@@ -100,13 +100,13 @@ Run the checks from the repository root:
 mise run check
 ```
 
-Run `mise run test:python` for tests only. The test task uses uv to provision an
+Run `mise run test:python` for just the tests. The test task uses uv to set up an
 isolated Python 3.14 environment with Home Assistant and its custom-component
-pytest fixtures. Tests exercise configuration flows and recorder persistence;
-external API calls remain mocked.
+pytest fixtures. Tests cover configuration flows and recorder persistence, with
+external API calls mocked.
 
-GitHub Actions also runs HACS and hassfest validation. Live verification requires
-a Home Assistant installation connected to Energy Locals.
+GitHub Actions also runs HACS and hassfest validation. Testing against the real
+service needs a Home Assistant installation connected to Energy Locals.
 
 ## Licence
 
