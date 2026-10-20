@@ -1,9 +1,15 @@
 # Development
 [tasks.check]
-depends = ["check:actions", "check:python", "check:updates", "test:python"]
+depends = [
+  "check:actions",
+  "check:mise",
+  "check:python",
+  "check:updates",
+  "test:python",
+]
 
 [tasks.fmt]
-depends = ["fmt:python"]
+depends = ["fmt:mise", "fmt:python"]
 
 # Match the Python version supported by Home Assistant's pinned test dependencies.
 [tasks."test:python"]
