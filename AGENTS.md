@@ -24,9 +24,9 @@
 - Keep config entry data and entity unique IDs stable unless the corresponding
   config entry or entity registry migration is included. Preserve existing entity
   names and user customisations when changing naming.
-- Keep the `hacs.json` minimum Home Assistant version equal to the `homeassistant`
-  test pin, which must match `pytest-homeassistant-custom-component`; Renovate
-  raises them together.
+- Keep the `hacs.json` and README minimum Home Assistant version equal to the
+  `homeassistant` test pin, which must match `pytest-homeassistant-custom-component`;
+  Renovate raises them together.
 
 ## Changes
 
