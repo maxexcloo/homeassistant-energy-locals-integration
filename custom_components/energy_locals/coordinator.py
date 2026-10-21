@@ -37,6 +37,7 @@ from .const import (
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
+    CONF_RESET_START_DATE,
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     DOMAIN,
@@ -159,7 +160,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             return
         data = dict(self.config_entry.data)
         previous_account = data.pop(CONF_RESET_ACCOUNT, None)
+        previous_start_date = data.pop(CONF_RESET_START_DATE, None)
         data.pop(CONF_RESET_STATISTICS, None)
+        if not rebuild_succeeded and previous_start_date:
+            data[CONF_START_DATE] = previous_start_date
         if (
             not rebuild_succeeded
             and previous_account
@@ -227,17 +231,17 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
     def _is_day_complete(self, usage_data: list, day: datetime.date) -> bool:
         """Require every half-hour interval, including daylight saving transitions."""
-        intervals = {start for _point, start in _interval_starts(usage_data)}
+        intervals = [start for _point, start in _interval_starts(usage_data)]
         start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
             datetime.UTC
         )
         end = datetime.datetime.combine(
             day + timedelta(days=1), datetime.time(), TZ_SYDNEY
         ).astimezone(datetime.UTC)
-        return all(
-            start + index * _INTERVAL in intervals
-            for index in range((end - start) // _INTERVAL)
-        )
+        expected = {
+            start + index * _INTERVAL for index in range((end - start) // _INTERVAL)
+        }
+        return len(intervals) == len(expected) and set(intervals) == expected
 
     async def _async_update_data(self):
         # Home Assistant serialises refreshes. Consume only this refresh's request
@@ -319,8 +323,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         # 3. UP-TO-DATE CHECK
         if curr >= today_syd:
-            if clear_before_import:
+            if is_rebuilding:
                 raise UpdateFailed("No replacement history is available to import")
+            if last_ts_e is None:
+                raise UpdateFailed("No valid history found")
             return {
                 "last_synced": dt_util.now(),
                 "price": price_kwh,

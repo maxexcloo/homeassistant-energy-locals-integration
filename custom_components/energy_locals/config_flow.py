@@ -20,6 +20,7 @@ from .const import (
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
+    CONF_RESET_START_DATE,
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     CONF_TARIFF_EFFECTIVE_DATE,
@@ -199,8 +200,13 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_ACCOUNT: account_id,
                     CONF_START_DATE: user_input[CONF_START_DATE],
                 }
-                if account_changed or user_input[CONF_RESET_STATISTICS]:
+                if (
+                    account_changed
+                    or user_input[CONF_START_DATE] != entry.data[CONF_START_DATE]
+                    or user_input[CONF_RESET_STATISTICS]
+                ):
                     data_updates[CONF_RESET_ACCOUNT] = entry.data[CONF_ACCOUNT]
+                    data_updates[CONF_RESET_START_DATE] = entry.data[CONF_START_DATE]
                     data_updates[CONF_RESET_STATISTICS] = True
                 return self.async_update_reload_and_abort(
                     entry,

@@ -64,7 +64,11 @@ Use **Reconfigure** on the Energy Locals entry to change the utility account or
 import start date, or to clear imported statistics and rebuild them. Changing the
 utility account validates and rebuilds the new account, then removes the old
 account's statistics. If the replacement history can't be staged, the account
-change is reverted and the old statistics are left alone.
+change is reverted and the old statistics are left alone. Changing the import
+start date also rebuilds history and restores the previous date if the rebuild
+cannot complete. A later start date is rejected when it would remove existing
+history. Days containing duplicate or off-grid intervals are not imported;
+missing history remains unavailable rather than showing zero.
 
 ## Energy Dashboard Setup
 

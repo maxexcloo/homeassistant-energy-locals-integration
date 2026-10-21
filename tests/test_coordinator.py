@@ -22,6 +22,7 @@ from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
     CONF_RESET_ACCOUNT,
+    CONF_RESET_START_DATE,
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     CONF_TARIFFS,
@@ -160,6 +161,59 @@ class TestEnergyLocalsCoordinator:
         assert self.coordinator._is_day_complete(data, day)
         data.pop(interval_count // 2)
         assert not self.coordinator._is_day_complete(data, day)
+
+    @pytest.mark.parametrize("invalid", ["duplicate", "off_grid", "wrong_day"])
+    async def test_extra_intervals_do_not_publish_inflated_history(self, invalid):
+        data = _usage_data(self.day)
+        point = dict(data[0])
+        if invalid == "off_grid":
+            point["dateValue"] = f"{self.day}T00:15:00"
+        elif invalid == "wrong_day":
+            point["dateValue"] = f"{self.day + datetime.timedelta(days=1)}T00:00:00"
+        data.append(point)
+        self.api.get_data.return_value = data
+        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
+        with pytest.raises(UpdateFailed, match="No valid history"):
+            await self.coordinator._perform_sync()
+        self.add_external_statistics.assert_not_called()
+
+    async def test_today_start_without_history_stays_unavailable(self):
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={
+                **self.entry.data,
+                CONF_START_DATE: (self.day + datetime.timedelta(days=1)).isoformat(),
+            },
+        )
+        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
+        with pytest.raises(UpdateFailed, match="No valid history"):
+            await self.coordinator._perform_sync()
+        self.api.get_data.assert_not_called()
+        self.add_external_statistics.assert_not_called()
+
+    @pytest.mark.parametrize("account_changed", [False, True])
+    async def test_rejected_rebuild_restores_start_date(self, account_changed):
+        previous = (self.day - datetime.timedelta(days=1)).isoformat()
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={
+                **self.entry.data,
+                CONF_RESET_ACCOUNT: "previous" if account_changed else "123",
+                CONF_RESET_START_DATE: previous,
+                CONF_RESET_STATISTICS: True,
+            },
+        )
+        self.coordinator._perform_sync = AsyncMock(
+            side_effect=UpdateFailed("replacement history is incomplete")
+        )
+        with pytest.raises(UpdateFailed):
+            await self.coordinator._async_update_data()
+        assert self.entry.data[CONF_START_DATE] == previous
+        assert self.entry.data[CONF_ACCOUNT] == (
+            "previous" if account_changed else "123"
+        )
+        assert CONF_RESET_START_DATE not in self.entry.data
+        assert CONF_RESET_STATISTICS not in self.entry.data
 
     async def test_wrong_day_final_interval_does_not_publish_partial_history(self):
         next_day = self.day + datetime.timedelta(days=1)
@@ -504,6 +558,42 @@ class TestRecorderRebuilds:
             assert after[statistic_id][-1]["sum"] == pytest.approx(total)
             assert after[statistic_id][-1]["state"] == pytest.approx(total)
         assert result["total_kwh"] == pytest.approx(4.0)
+
+    @pytest.mark.parametrize("later", [False, True])
+    async def test_changed_start_date_rebuilds_or_restores_existing_history(
+        self, later
+    ):
+        """Earlier imports replace cumulative totals; later dates cannot erase rows."""
+        old_start = self.first_day if later else self.day
+        new_start = self.day if later else self.first_day
+        days = [self.first_day, self.day] if later else [self.day]
+        await self._seed_statistics(days, days)
+        before = await self._read_statistics()
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={
+                **self.entry.data,
+                CONF_START_DATE: new_start.isoformat(),
+                CONF_RESET_START_DATE: old_start.isoformat(),
+                CONF_RESET_ACCOUNT: "123",
+                CONF_RESET_STATISTICS: True,
+            },
+        )
+        self.api.get_data.side_effect = lambda day: _usage_data(day, total=2.0)
+        if later:
+            with pytest.raises(UpdateFailed, match="replacement history is incomplete"):
+                await self.coordinator._async_update_data()
+            assert self.entry.data[CONF_START_DATE] == old_start.isoformat()
+            assert await self._read_statistics() == before
+        else:
+            result = await self.coordinator._async_update_data()
+            after = await self._read_statistics()
+            assert len(after[self.statistic_ids[0]]) == 48
+            assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(4.0)
+            assert result["total_kwh"] == pytest.approx(4.0)
+            assert self.entry.data[CONF_START_DATE] == new_start.isoformat()
+        assert CONF_RESET_START_DATE not in self.entry.data
+        assert CONF_RESET_STATISTICS not in self.entry.data
 
     async def test_automatic_repair_clears_only_corrupt_future_rows(self):
         tomorrow = self.day + datetime.timedelta(days=2)

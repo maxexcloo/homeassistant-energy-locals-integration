@@ -18,6 +18,7 @@ from custom_components.energy_locals.const import (
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_RESET_ACCOUNT,
+    CONF_RESET_START_DATE,
     CONF_RESET_STATISTICS,
     CONF_START_DATE,
     CONF_TARIFF_EFFECTIVE_DATE,
@@ -309,3 +310,26 @@ async def test_options_store_tariffs(hass, prices, effective_offset, schedule):
     assert result["type"] == "create_entry"
     assert entry.options == {CONF_TARIFFS: expected}
     assert entry.data == before
+
+
+@pytest.mark.usefixtures("mock_setup")
+async def test_changed_start_date_queues_rebuild_without_reset_checkbox(hass):
+    """A date change must rebuild rather than continue from the last import."""
+    start = _today() - datetime.timedelta(days=3)
+    entry = _entry(hass, start)
+    changed = (start + datetime.timedelta(days=1)).isoformat()
+    with patch("custom_components.energy_locals.config_flow.EnergyLocalsAPI") as api:
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_ACCOUNT: "123",
+                CONF_RESET_STATISTICS: False,
+                CONF_START_DATE: changed,
+            },
+        )
+    api.assert_not_called()
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_START_DATE] == changed
+    assert entry.data[CONF_RESET_START_DATE] == start.isoformat()
+    assert entry.data[CONF_RESET_STATISTICS]
