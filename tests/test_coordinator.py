@@ -426,13 +426,15 @@ class TestRecorderRebuilds:
         assert result["total_kwh"] == pytest.approx(7.0)
         assert result["total_cost"] == pytest.approx(5.333)
 
-    @pytest.mark.parametrize("force_rebuild", [False, True])
+    @pytest.mark.parametrize("rebuild", ["automatic", "button", "reset"])
     @pytest.mark.parametrize("missing", ["day", "hour", "interval"])
-    async def test_incomplete_rebuild_preserves_recorder_rows(
-        self, force_rebuild, missing
-    ):
+    async def test_incomplete_rebuild_preserves_recorder_rows(self, rebuild, missing):
         days = [self.first_day, self.day]
-        await self._seed_statistics(days, days if force_rebuild else days[:1])
+        await self._seed_statistics(days, days[:1] if rebuild == "automatic" else days)
+        if rebuild == "reset":
+            self.hass.config_entries.async_update_entry(
+                self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
+            )
         before = await self._read_statistics()
         replacement = _usage_data(self.day)
         if missing == "day":
@@ -444,20 +446,55 @@ class TestRecorderRebuilds:
         self.api.get_data.side_effect = [_usage_data(self.first_day), replacement]
 
         with pytest.raises(UpdateFailed, match="replacement history is incomplete"):
-            await self.coordinator._perform_sync(force_rebuild=force_rebuild)
+            await self.coordinator._perform_sync(force_rebuild=rebuild == "button")
 
         assert await self._read_statistics() == before
 
-    async def test_complete_manual_rebuild_upserts_recorder_rows(self):
+    @pytest.mark.parametrize("missing", ["day", "interval"])
+    async def test_reset_preserves_history_when_an_older_day_has_gaps(self, missing):
+        """A reset cannot skip a gap outside the recent publication grace period."""
+        older_day = self.first_day - datetime.timedelta(days=4)
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={
+                **self.entry.data,
+                CONF_RESET_STATISTICS: True,
+                CONF_START_DATE: older_day.isoformat(),
+            },
+            options={
+                CONF_TARIFFS: upsert_tariff([], older_day.isoformat(), 0.359, 0.94)
+            },
+        )
+        await self._seed_statistics([older_day, self.day], [older_day, self.day])
+        before = await self._read_statistics()
+        replacement = _usage_data(older_day)
+        if missing == "day":
+            replacement = []
+        else:
+            replacement.pop(20)
+        self.api.get_data.return_value = replacement
+
+        with pytest.raises(UpdateFailed, match="Rebuild stopped"):
+            await self.coordinator._perform_sync()
+
+        assert await self._read_statistics() == before
+        self.api.get_data.assert_called_once_with(older_day)
+
+    @pytest.mark.parametrize("reset", [False, True])
+    async def test_complete_manual_rebuild_updates_recorder_rows(self, reset):
         days = [self.first_day, self.day]
         await self._seed_statistics(days, days)
+        if reset:
+            self.hass.config_entries.async_update_entry(
+                self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
+            )
         before = await self._read_statistics()
         self.api.get_data.side_effect = [
             _usage_data(self.first_day),
             _usage_data(self.day, total=3.0),
         ]
 
-        result = await self.coordinator._perform_sync(force_rebuild=True)
+        result = await self.coordinator._perform_sync(force_rebuild=not reset)
 
         after = await self._read_statistics()
         for statistic_id, total in zip(self.statistic_ids, (4.0, 3.316), strict=True):

@@ -366,8 +366,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     # and corrupt sums for all subsequent days. Retry next sync.
                     _LOGGER.debug("No data for %s yet, stopping sync.", curr)
                     break
-                if is_rebuilding and not reset_requested:
-                    # A non-destructive rebuild must not overwrite later cumulative
+                if is_rebuilding:
+                    # A rebuild must not overwrite later cumulative
                     # rows when an older contribution is no longer available.
                     raise UpdateFailed(
                         f"Rebuild stopped: no usage data available for {curr}"
@@ -386,7 +386,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 if within_grace:
                     _LOGGER.debug("Day %s has missing intervals, stopping sync", curr)
                     break
-                if is_rebuilding and not reset_requested:
+                if is_rebuilding:
                     raise UpdateFailed(
                         f"Rebuild stopped: incomplete usage data for {curr}"
                     )
@@ -416,7 +416,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 buckets[t_utc]["cost"] += val * day_tariff[CONF_PRICE_USAGE_DOLLARS]
 
             if not buckets:
-                if is_rebuilding and not reset_requested:
+                if is_rebuilding:
                     raise UpdateFailed(
                         f"Rebuild stopped: no valid usage intervals for {curr}"
                     )
@@ -448,7 +448,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         if not st_e_all and last_ts_e is None:
             raise UpdateFailed("No valid history found")
 
-        if is_rebuilding and not reset_requested:
+        if is_rebuilding:
             if not st_e_all:
                 raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
             await self._async_validate_replacement(
@@ -457,9 +457,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 datetime.datetime.combine(today_syd, datetime.time(), TZ_SYDNEY),
             )
 
-        # Clear corrupt or explicitly reset series only after a replacement plan
-        # has been staged. Explicit resets may skip genuine older gaps; automatic
-        # repairs abort on those gaps and preserve the existing series.
+        # Clear statistics only after staging complete replacement history and
+        # confirming every existing non-future recorder hour remains covered.
         if clear_before_import:
             await self._async_clear_imported_statistics(
                 {account_id, conf.get(CONF_RESET_ACCOUNT)}
