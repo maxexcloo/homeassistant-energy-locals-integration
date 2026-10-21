@@ -27,6 +27,8 @@
 - Keep the `hacs.json` and README minimum Home Assistant version equal to the
   `homeassistant` test pin, which must match `pytest-homeassistant-custom-component`;
   Renovate raises them together.
+- Declare runtime requirements only in `manifest.json`; the test task installs them
+  from there.
 
 ## Changes
 
