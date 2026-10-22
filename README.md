@@ -58,17 +58,14 @@ the prices already in effect on that date changes nothing. If you add or correct
 a tariff that's already in effect, press **Rebuild Statistics** afterwards to
 recalculate the affected historical cost.
 
-## Changing the Account
+## Changing the Import Start Date
 
-Use **Reconfigure** on the Energy Locals entry to change the utility account or
-import start date, or to clear imported statistics and rebuild them. Changing the
-utility account validates and rebuilds the new account, then removes the old
-account's statistics. If the replacement history can't be staged, the account
-change is reverted and the old statistics are left alone. Changing the import
-start date also rebuilds history and restores the previous date if the rebuild
-cannot complete. A later start date is rejected when it would remove existing
-history. Days containing duplicate or off-grid intervals are not imported;
-missing history remains unavailable rather than showing zero.
+Use **Reconfigure** on the Energy Locals entry to change the import start date.
+History is then rebuilt from the new date. If that history is incomplete, the
+existing statistics are kept. Days containing duplicate or off-grid intervals are
+not imported; missing history remains unavailable rather than showing zero.
+
+To change the utility account, remove the entry and add it again.
 
 ## Energy Dashboard Setup
 
@@ -94,20 +91,12 @@ entity IDs already stored in the entity registry.
 
 ## Development
 
-Install the [shared Mise configuration](https://github.com/maxexcloo/dotfiles#shared-tools--tasks)
-before running local Mise tasks.
-
-Run `mise install` to install your configured development tools.
-Run the checks from the repository root:
+Install the [shared Mise configuration](https://github.com/maxexcloo/dotfiles#shared-tools--tasks),
+then run the checks from the repository root:
 
 ```sh
 mise run check
 ```
-
-Run `mise run test:python` for just the tests. The test task uses uv to set up an
-isolated Python 3.14 environment with Home Assistant and its custom-component
-pytest fixtures. Tests cover configuration flows and recorder persistence, with
-external API calls mocked.
 
 GitHub Actions also runs HACS and hassfest validation. Testing against the real
 service needs a Home Assistant installation connected to Energy Locals.

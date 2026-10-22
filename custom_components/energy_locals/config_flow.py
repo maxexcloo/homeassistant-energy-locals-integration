@@ -5,6 +5,7 @@ import datetime
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import callback
 from homeassistant.helpers.selector import DateSelector
 
@@ -19,9 +20,6 @@ from .const import (
     CONF_PASSWORD,
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
-    CONF_RESET_ACCOUNT,
-    CONF_RESET_START_DATE,
-    CONF_RESET_STATISTICS,
     CONF_START_DATE,
     CONF_TARIFF_EFFECTIVE_DATE,
     CONF_TARIFFS,
@@ -32,12 +30,7 @@ from .const import (
     TZ_SYDNEY,
     entry_title,
 )
-from .tariffs import (
-    TARIFF_EFFECTIVE_FROM,
-    normalise_tariffs,
-    tariff_for_date,
-    upsert_tariff,
-)
+from .tariffs import TARIFF_EFFECTIVE_FROM, tariff_for_date, upsert_tariff
 
 
 async def _async_validate_account(hass, username, password, account_id):
@@ -45,7 +38,7 @@ async def _async_validate_account(hass, username, password, account_id):
     api = EnergyLocalsAPI(username, password, account_id)
     try:
         await hass.async_add_executor_job(api.login)
-        yesterday = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
+        yesterday = _today() - datetime.timedelta(days=1)
         await hass.async_add_executor_job(api.get_data, yesterday)
     except EnergyLocalsAuthError:
         return {"base": "invalid_auth"}
@@ -168,64 +161,36 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reconfigure(self, user_input=None):
-        """Change the utility account, import start date or rebuild from scratch."""
+        """Change the import start date and rebuild history from it."""
         entry = self._get_reconfigure_entry()
         errors = {}
 
         if user_input is not None:
-            account_id = user_input[CONF_ACCOUNT]
-            account_changed = account_id != entry.data[CONF_ACCOUNT]
-            existing_entry = self.hass.config_entries.async_entry_for_domain_unique_id(
-                DOMAIN, account_id
-            )
             start_date = datetime.date.fromisoformat(user_input[CONF_START_DATE])
             try:
-                tariff_for_date(normalise_tariffs(entry.options), start_date)
+                tariff_for_date(entry.options[CONF_TARIFFS], start_date)
             except ValueError:
                 errors["base"] = "start_date_before_tariff"
             if start_date > _today():
                 errors["base"] = "start_date_future"
-            if existing_entry and existing_entry.entry_id != entry.entry_id:
-                errors["base"] = "already_configured"
-            elif account_changed and not errors:
-                errors = await _async_validate_account(
-                    self.hass,
-                    entry.data[CONF_USERNAME],
-                    entry.data[CONF_PASSWORD],
-                    account_id,
-                )
 
             if not errors:
-                data_updates = {
-                    CONF_ACCOUNT: account_id,
-                    CONF_START_DATE: user_input[CONF_START_DATE],
-                }
-                if (
-                    account_changed
-                    or user_input[CONF_START_DATE] != entry.data[CONF_START_DATE]
-                    or user_input[CONF_RESET_STATISTICS]
-                ):
-                    data_updates[CONF_RESET_ACCOUNT] = entry.data[CONF_ACCOUNT]
-                    data_updates[CONF_RESET_START_DATE] = entry.data[CONF_START_DATE]
-                    data_updates[CONF_RESET_STATISTICS] = True
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data_updates=data_updates,
-                    title=entry_title(account_id),
-                    unique_id=account_id,
-                )
+                changed = user_input[CONF_START_DATE] != entry.data[CONF_START_DATE]
+                result = self.async_update_and_abort(entry, data_updates=user_input)
+                if changed and entry.state is ConfigEntryState.LOADED:
+                    entry.async_create_background_task(
+                        self.hass,
+                        entry.runtime_data.async_force_sync(),
+                        f"{DOMAIN} statistics rebuild",
+                    )
+                return result
 
         data = user_input or entry.data
         schema = vol.Schema(
             {
-                vol.Required(CONF_ACCOUNT, default=data[CONF_ACCOUNT]): cv.string,
                 vol.Required(
                     CONF_START_DATE, default=data[CONF_START_DATE]
                 ): DateSelector(),
-                vol.Required(
-                    CONF_RESET_STATISTICS,
-                    default=bool(user_input and user_input[CONF_RESET_STATISTICS]),
-                ): cv.boolean,
             }
         )
         return self.async_show_form(
@@ -237,7 +202,7 @@ class EnergyLocalsOptionsFlow(config_entries.OptionsFlowWithReload):
     """Manage the effective-dated tariff schedule."""
 
     async def async_step_init(self, user_input=None):
-        tariffs = normalise_tariffs(self.config_entry.options)
+        tariffs = self.config_entry.options[CONF_TARIFFS]
         errors = {}
         if user_input is not None:
             effective_date = user_input[CONF_TARIFF_EFFECTIVE_DATE]

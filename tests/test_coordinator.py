@@ -21,9 +21,6 @@ from custom_components.energy_locals.api import (
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_PASSWORD,
-    CONF_RESET_ACCOUNT,
-    CONF_RESET_START_DATE,
-    CONF_RESET_STATISTICS,
     CONF_START_DATE,
     CONF_TARIFFS,
     CONF_USERNAME,
@@ -191,30 +188,6 @@ class TestEnergyLocalsCoordinator:
         self.api.get_data.assert_not_called()
         self.add_external_statistics.assert_not_called()
 
-    @pytest.mark.parametrize("account_changed", [False, True])
-    async def test_rejected_rebuild_restores_start_date(self, account_changed):
-        previous = (self.day - datetime.timedelta(days=1)).isoformat()
-        self.hass.config_entries.async_update_entry(
-            self.entry,
-            data={
-                **self.entry.data,
-                CONF_RESET_ACCOUNT: "previous" if account_changed else "123",
-                CONF_RESET_START_DATE: previous,
-                CONF_RESET_STATISTICS: True,
-            },
-        )
-        self.coordinator._perform_sync = AsyncMock(
-            side_effect=UpdateFailed("replacement history is incomplete")
-        )
-        with pytest.raises(UpdateFailed):
-            await self.coordinator._async_update_data()
-        assert self.entry.data[CONF_START_DATE] == previous
-        assert self.entry.data[CONF_ACCOUNT] == (
-            "previous" if account_changed else "123"
-        )
-        assert CONF_RESET_START_DATE not in self.entry.data
-        assert CONF_RESET_STATISTICS not in self.entry.data
-
     async def test_wrong_day_final_interval_does_not_publish_partial_history(self):
         next_day = self.day + datetime.timedelta(days=1)
         self.api.get_data.return_value = [
@@ -274,43 +247,7 @@ class TestEnergyLocalsCoordinator:
         assert metadata["unit_class"] == "energy"
         assert "has_mean" not in metadata
 
-    async def test_reset_does_not_clear_when_no_replacement_history_exists(self):
-        self.hass.config_entries.async_update_entry(
-            self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
-        )
-        self.api.get_data.return_value = []
-        self.coordinator._get_db_total = AsyncMock(
-            side_effect=[(12.0, 1.0), (4.0, 1.0)]
-        )
-        self.coordinator._async_clear_imported_statistics = AsyncMock()
-        with pytest.raises(UpdateFailed):
-            await self.coordinator._perform_sync()
-        self.coordinator._async_clear_imported_statistics.assert_not_awaited()
-        self.api.get_data.assert_called_once_with(self.day)
-
-    async def test_reset_clears_only_after_replacement_history_is_staged(self):
-        self.hass.config_entries.async_update_entry(
-            self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
-        )
-        self.api.get_data.return_value = _usage_data(self.day)
-        self.coordinator._get_db_total = AsyncMock(
-            side_effect=[(12.0, 1.0), (4.0, 1.0)]
-        )
-        self.coordinator._async_clear_imported_statistics = AsyncMock()
-        result = await self.coordinator._perform_sync()
-        self.coordinator._async_clear_imported_statistics.assert_awaited_once()
-        assert result["total_kwh"] == pytest.approx(1.0)
-        assert self.add_external_statistics.call_count == 2
-
-    async def test_rebuild_flags_are_consumed_after_failure(self):
-        self.hass.config_entries.async_update_entry(
-            self.entry,
-            data={
-                **self.entry.data,
-                CONF_RESET_ACCOUNT: "old-account",
-                CONF_RESET_STATISTICS: True,
-            },
-        )
+    async def test_rebuild_request_is_consumed_after_failure(self):
         self.coordinator._force_rebuild = True
         self.coordinator._perform_sync = AsyncMock(
             side_effect=UpdateFailed("source unavailable")
@@ -318,36 +255,6 @@ class TestEnergyLocalsCoordinator:
         with pytest.raises(UpdateFailed):
             await self.coordinator._async_update_data()
         assert not self.coordinator._force_rebuild
-        assert self.entry.data[CONF_ACCOUNT] == "old-account"
-        assert CONF_RESET_ACCOUNT not in self.entry.data
-        assert CONF_RESET_STATISTICS not in self.entry.data
-
-    async def test_reset_stays_queued_after_a_connection_failure(self):
-        self.hass.config_entries.async_update_entry(
-            self.entry,
-            data={
-                **self.entry.data,
-                CONF_RESET_ACCOUNT: "old-account",
-                CONF_RESET_STATISTICS: True,
-            },
-        )
-        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
-        self.api.get_data.side_effect = EnergyLocalsAPIError("offline")
-        with (
-            patch("custom_components.energy_locals.coordinator.asyncio.sleep"),
-            pytest.raises(UpdateFailed),
-        ):
-            await self.coordinator._async_update_data()
-        assert self.entry.data[CONF_ACCOUNT] == "123"
-        assert self.entry.data[CONF_RESET_STATISTICS]
-
-        self.api.get_data.side_effect = None
-        self.api.get_data.return_value = _usage_data(self.day)
-        self.coordinator._async_clear_imported_statistics = AsyncMock()
-        await self.coordinator._async_update_data()
-        self.coordinator._async_clear_imported_statistics.assert_awaited_once()
-        assert self.entry.data[CONF_ACCOUNT] == "123"
-        assert CONF_RESET_STATISTICS not in self.entry.data
 
     async def test_failed_requests_back_off_and_honour_retry_after(self):
         self.api.get_data.side_effect = [
@@ -480,15 +387,11 @@ class TestRecorderRebuilds:
         assert result["total_kwh"] == pytest.approx(7.0)
         assert result["total_cost"] == pytest.approx(5.333)
 
-    @pytest.mark.parametrize("rebuild", ["automatic", "button", "reset"])
+    @pytest.mark.parametrize("rebuild", ["automatic", "button"])
     @pytest.mark.parametrize("missing", ["day", "hour", "interval"])
     async def test_incomplete_rebuild_preserves_recorder_rows(self, rebuild, missing):
         days = [self.first_day, self.day]
         await self._seed_statistics(days, days[:1] if rebuild == "automatic" else days)
-        if rebuild == "reset":
-            self.hass.config_entries.async_update_entry(
-                self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
-            )
         before = await self._read_statistics()
         replacement = _usage_data(self.day)
         if missing == "day":
@@ -505,14 +408,13 @@ class TestRecorderRebuilds:
         assert await self._read_statistics() == before
 
     @pytest.mark.parametrize("missing", ["day", "interval"])
-    async def test_reset_preserves_history_when_an_older_day_has_gaps(self, missing):
-        """A reset cannot skip a gap outside the recent publication grace period."""
+    async def test_rebuild_preserves_history_when_an_older_day_has_gaps(self, missing):
+        """A rebuild cannot skip a gap outside the recent publication grace period."""
         older_day = self.first_day - datetime.timedelta(days=4)
         self.hass.config_entries.async_update_entry(
             self.entry,
             data={
                 **self.entry.data,
-                CONF_RESET_STATISTICS: True,
                 CONF_START_DATE: older_day.isoformat(),
             },
             options={
@@ -529,26 +431,21 @@ class TestRecorderRebuilds:
         self.api.get_data.return_value = replacement
 
         with pytest.raises(UpdateFailed, match="Rebuild stopped"):
-            await self.coordinator._perform_sync()
+            await self.coordinator._perform_sync(force_rebuild=True)
 
         assert await self._read_statistics() == before
         self.api.get_data.assert_called_once_with(older_day)
 
-    @pytest.mark.parametrize("reset", [False, True])
-    async def test_complete_manual_rebuild_updates_recorder_rows(self, reset):
+    async def test_complete_manual_rebuild_updates_recorder_rows(self):
         days = [self.first_day, self.day]
         await self._seed_statistics(days, days)
-        if reset:
-            self.hass.config_entries.async_update_entry(
-                self.entry, data={**self.entry.data, CONF_RESET_STATISTICS: True}
-            )
         before = await self._read_statistics()
         self.api.get_data.side_effect = [
             _usage_data(self.first_day),
             _usage_data(self.day, total=3.0),
         ]
 
-        result = await self.coordinator._perform_sync(force_rebuild=not reset)
+        result = await self.coordinator._perform_sync(force_rebuild=True)
 
         after = await self._read_statistics()
         for statistic_id, total in zip(self.statistic_ids, (4.0, 3.316), strict=True):
@@ -560,11 +457,8 @@ class TestRecorderRebuilds:
         assert result["total_kwh"] == pytest.approx(4.0)
 
     @pytest.mark.parametrize("later", [False, True])
-    async def test_changed_start_date_rebuilds_or_restores_existing_history(
-        self, later
-    ):
+    async def test_changed_start_date_rebuilds_or_keeps_existing_history(self, later):
         """Earlier imports replace cumulative totals; later dates cannot erase rows."""
-        old_start = self.first_day if later else self.day
         new_start = self.day if later else self.first_day
         days = [self.first_day, self.day] if later else [self.day]
         await self._seed_statistics(days, days)
@@ -574,26 +468,19 @@ class TestRecorderRebuilds:
             data={
                 **self.entry.data,
                 CONF_START_DATE: new_start.isoformat(),
-                CONF_RESET_START_DATE: old_start.isoformat(),
-                CONF_RESET_ACCOUNT: "123",
-                CONF_RESET_STATISTICS: True,
             },
         )
         self.api.get_data.side_effect = lambda day: _usage_data(day, total=2.0)
         if later:
             with pytest.raises(UpdateFailed, match="replacement history is incomplete"):
-                await self.coordinator._async_update_data()
-            assert self.entry.data[CONF_START_DATE] == old_start.isoformat()
+                await self.coordinator._perform_sync(force_rebuild=True)
             assert await self._read_statistics() == before
         else:
-            result = await self.coordinator._async_update_data()
+            result = await self.coordinator._perform_sync(force_rebuild=True)
             after = await self._read_statistics()
             assert len(after[self.statistic_ids[0]]) == 48
             assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(4.0)
             assert result["total_kwh"] == pytest.approx(4.0)
-            assert self.entry.data[CONF_START_DATE] == new_start.isoformat()
-        assert CONF_RESET_START_DATE not in self.entry.data
-        assert CONF_RESET_STATISTICS not in self.entry.data
 
     async def test_automatic_repair_clears_only_corrupt_future_rows(self):
         tomorrow = self.day + datetime.timedelta(days=2)

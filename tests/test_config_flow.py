@@ -4,6 +4,7 @@ import datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers.data_entry_flow import _BaseFlowManagerView
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -17,9 +18,6 @@ from custom_components.energy_locals.const import (
     CONF_PASSWORD,
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
-    CONF_RESET_ACCOUNT,
-    CONF_RESET_START_DATE,
-    CONF_RESET_STATISTICS,
     CONF_START_DATE,
     CONF_TARIFF_EFFECTIVE_DATE,
     CONF_TARIFFS,
@@ -121,7 +119,7 @@ async def test_infinite_prices_show_a_form_error(hass, step):
 
 
 @pytest.mark.usefixtures("mock_setup")
-@pytest.mark.parametrize("step", ["user", "reauth", "reconfigure"])
+@pytest.mark.parametrize("step", ["user", "reauth"])
 @pytest.mark.parametrize(
     ("failure", "error"),
     [
@@ -167,17 +165,6 @@ async def test_account_validation(hass, step, failure, error):
                 },
             )
             expected = ("replacement@example.com", "replacement-password", "123")
-        else:
-            result = await entry.start_reconfigure_flow(hass)
-            result = await hass.config_entries.flow.async_configure(
-                result["flow_id"],
-                {
-                    CONF_ACCOUNT: "456",
-                    CONF_RESET_STATISTICS: False,
-                    CONF_START_DATE: yesterday.isoformat(),
-                },
-            )
-            expected = ("user@example.com", "test-password", "456")
         await hass.async_block_till_done()
 
     factory.assert_called_once_with(*expected)
@@ -205,70 +192,33 @@ async def test_account_validation(hass, step, failure, error):
         assert result["options"] == {
             CONF_TARIFFS: upsert_tariff([], yesterday.isoformat(), 0.359, 0.94)
         }
-    elif step == "reauth":
+    else:
         assert result["reason"] == "reauth_successful"
         assert entry.data[CONF_PASSWORD] == "replacement-password"
         assert entry.data[CONF_USERNAME] == "replacement@example.com"
-    else:
-        assert result["reason"] == "reconfigure_successful"
-        assert entry.data[CONF_ACCOUNT] == "456"
-        assert entry.data[CONF_RESET_ACCOUNT] == "123"
-        assert entry.data[CONF_RESET_STATISTICS]
-        assert entry.title == "Energy Locals (456)"
-        assert entry.unique_id == "456"
 
 
 @pytest.mark.usefixtures("mock_setup")
 @pytest.mark.parametrize(
-    ("account", "start_offset", "error"),
-    [
-        ("456", 0, "already_configured"),
-        ("123", -1, "start_date_before_tariff"),
-        ("123", 2, "start_date_future"),
-    ],
+    ("start_offset", "error"),
+    [(-1, "start_date_before_tariff"), (2, "start_date_future")],
 )
-async def test_reconfigure_rejects_invalid_settings(hass, account, start_offset, error):
+async def test_reconfigure_rejects_invalid_settings(hass, start_offset, error):
     """Reconfiguration keeps the entry unchanged when the settings are invalid."""
     yesterday = _today() - datetime.timedelta(days=1)
     entry = _entry(hass, yesterday)
-    _entry(hass, yesterday, account="456")
     before = dict(entry.data)
-    with patch("custom_components.energy_locals.config_flow.EnergyLocalsAPI") as api:
-        result = await entry.start_reconfigure_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_ACCOUNT: account,
-                CONF_RESET_STATISTICS: False,
-                CONF_START_DATE: (
-                    yesterday + datetime.timedelta(days=start_offset)
-                ).isoformat(),
-            },
-        )
-    api.assert_not_called()
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            CONF_START_DATE: (
+                yesterday + datetime.timedelta(days=start_offset)
+            ).isoformat()
+        },
+    )
     assert result["errors"] == {"base": error}
     assert entry.data == before
-
-
-@pytest.mark.usefixtures("mock_setup")
-async def test_reconfigure_queues_a_reset_for_the_same_account(hass):
-    """A reset without an account change needs no account validation."""
-    yesterday = _today() - datetime.timedelta(days=1)
-    entry = _entry(hass, yesterday)
-    with patch("custom_components.energy_locals.config_flow.EnergyLocalsAPI") as api:
-        result = await entry.start_reconfigure_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_ACCOUNT: "123",
-                CONF_RESET_STATISTICS: True,
-                CONF_START_DATE: yesterday.isoformat(),
-            },
-        )
-    api.assert_not_called()
-    assert result["reason"] == "reconfigure_successful"
-    assert entry.data[CONF_RESET_ACCOUNT] == "123"
-    assert entry.data[CONF_RESET_STATISTICS]
 
 
 @pytest.mark.usefixtures("mock_setup")
@@ -313,23 +263,18 @@ async def test_options_store_tariffs(hass, prices, effective_offset, schedule):
 
 
 @pytest.mark.usefixtures("mock_setup")
-async def test_changed_start_date_queues_rebuild_without_reset_checkbox(hass):
+async def test_changed_start_date_starts_a_rebuild(hass):
     """A date change must rebuild rather than continue from the last import."""
     start = _today() - datetime.timedelta(days=3)
     entry = _entry(hass, start)
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+    entry.runtime_data = Mock(async_force_sync=AsyncMock())
     changed = (start + datetime.timedelta(days=1)).isoformat()
-    with patch("custom_components.energy_locals.config_flow.EnergyLocalsAPI") as api:
-        result = await entry.start_reconfigure_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_ACCOUNT: "123",
-                CONF_RESET_STATISTICS: False,
-                CONF_START_DATE: changed,
-            },
-        )
-    api.assert_not_called()
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_START_DATE: changed}
+    )
+    await hass.async_block_till_done()
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_START_DATE] == changed
-    assert entry.data[CONF_RESET_START_DATE] == start.isoformat()
-    assert entry.data[CONF_RESET_STATISTICS]
+    entry.runtime_data.async_force_sync.assert_awaited_once()

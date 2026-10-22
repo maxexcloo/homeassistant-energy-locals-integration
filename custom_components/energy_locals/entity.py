@@ -12,18 +12,15 @@ class EnergyLocalsEntity(CoordinatorEntity):
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry):
+    def __init__(self, coordinator, key):
         """Initialise an Energy Locals entity."""
         super().__init__(coordinator)
-        self._entry = entry
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return the shared Energy Locals device information."""
-        return DeviceInfo(
+        entry = coordinator.config_entry
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_device_info = DeviceInfo(
             entry_type=DeviceEntryType.SERVICE,
             manufacturer=NAME,
             model="Utility Meter",
-            name=entry_title(self._entry.data[CONF_ACCOUNT]),
-            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=entry_title(entry.data[CONF_ACCOUNT]),
+            identifiers={(DOMAIN, entry.entry_id)},
         )

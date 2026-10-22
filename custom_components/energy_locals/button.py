@@ -6,18 +6,12 @@ from .entity import EnergyLocalsEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = entry.runtime_data
-    async_add_entities([EnergyLocalsSyncButton(coordinator, entry)])
+    async_add_entities([EnergyLocalsRebuildButton(entry.runtime_data, "force_rebuild")])
 
 
-class EnergyLocalsSyncButton(EnergyLocalsEntity, ButtonEntity):
+class EnergyLocalsRebuildButton(EnergyLocalsEntity, ButtonEntity):
     _attr_icon = "mdi:database-refresh"
     _attr_translation_key = "rebuild_statistics"
-
-    def __init__(self, coordinator, entry):
-        """Initialise the statistics rebuild button."""
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{entry.entry_id}_force_rebuild"
 
     async def async_press(self) -> None:
         await self.coordinator.async_force_sync()

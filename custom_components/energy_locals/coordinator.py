@@ -26,7 +26,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import (
-    EnergyLocalsAccountError,
     EnergyLocalsAPI,
     EnergyLocalsAPIError,
     EnergyLocalsAuthError,
@@ -36,16 +35,13 @@ from .const import (
     CONF_ACCOUNT,
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
-    CONF_RESET_ACCOUNT,
-    CONF_RESET_START_DATE,
-    CONF_RESET_STATISTICS,
     CONF_START_DATE,
+    CONF_TARIFFS,
     DOMAIN,
     NAME,
     TZ_SYDNEY,
-    entry_title,
 )
-from .tariffs import normalise_tariffs, tariff_for_date
+from .tariffs import tariff_for_date
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,18 +118,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             f"{DOMAIN}:{statistic_base}_cost",
         )
 
-    async def _async_clear_imported_statistics(self, account_ids):
+    async def _async_clear_imported_statistics(self, statistic_ids):
         """Clear imported statistics after replacement data has been validated."""
-        statistic_ids = []
-        for account_id in sorted(account_ids, key=lambda value: value or ""):
-            if account_id:
-                statistic_ids.extend(self._statistic_ids(account_id))
-
-        if not statistic_ids:
-            return
-
         _LOGGER.warning("Clearing Energy Locals statistics: %s", statistic_ids)
-        recorder = get_instance(self.hass)
         done = self.hass.loop.create_future()
 
         def _on_done(*_args):
@@ -143,7 +130,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             if not done.done():
                 done.set_result(None)
 
-        recorder.async_clear_statistics(statistic_ids, on_done=_on_done)
+        get_instance(self.hass).async_clear_statistics(statistic_ids, on_done=_on_done)
         try:
             await asyncio.wait_for(done, timeout=60)
         except TimeoutError as err:
@@ -154,33 +141,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         self._force_rebuild = True
         await self.async_refresh()
 
-    def _consume_reset_request(self, *, rebuild_succeeded: bool):
-        """Remove one-shot reset state after its rebuild attempt finishes."""
-        if not self.config_entry.data.get(CONF_RESET_STATISTICS):
-            return
-        data = dict(self.config_entry.data)
-        previous_account = data.pop(CONF_RESET_ACCOUNT, None)
-        previous_start_date = data.pop(CONF_RESET_START_DATE, None)
-        data.pop(CONF_RESET_STATISTICS, None)
-        if not rebuild_succeeded and previous_start_date:
-            data[CONF_START_DATE] = previous_start_date
-        if (
-            not rebuild_succeeded
-            and previous_account
-            and previous_account != data[CONF_ACCOUNT]
-        ):
-            data[CONF_ACCOUNT] = previous_account
-            self.hass.config_entries.async_update_entry(
-                self.config_entry,
-                data=data,
-                title=entry_title(previous_account),
-                unique_id=previous_account,
-            )
-            # The API client and device were set up for the rejected account.
-            self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
-            return
-        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
-
     async def _get_db_total(self, statistic_id):
         try:
             recorder = get_instance(self.hass)
@@ -189,10 +149,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             )
             if stats and statistic_id in stats and stats[statistic_id]:
                 record = stats[statistic_id][0]
-                start = record.get("start")
-                if isinstance(start, datetime.datetime):
-                    start = start.timestamp()
-                return record.get("sum"), start
+                return record.get("sum"), record.get("start")
         except Exception as err:
             raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
         return None, None
@@ -248,30 +205,15 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # so a button press during an API await remains queued for the next one.
         force_rebuild = self._force_rebuild
         self._force_rebuild = False
-        reset_requested = bool(self.config_entry.data.get(CONF_RESET_STATISTICS))
-        try:
-            result = await self._perform_sync(force_rebuild=force_rebuild)
-        except UpdateFailed as err:
-            # Keep a reset queued through connection failures so it retries.
-            cause = err.__cause__
-            transient = isinstance(cause, EnergyLocalsAPIError) and not isinstance(
-                cause, EnergyLocalsAccountError
-            )
-            if reset_requested and not transient:
-                self._consume_reset_request(rebuild_succeeded=False)
-            raise
-        if reset_requested:
-            self._consume_reset_request(rebuild_succeeded=True)
-        return result
+        return await self._perform_sync(force_rebuild=force_rebuild)
 
     async def _perform_sync(self, *, force_rebuild=False):
         conf = self.config_entry.data
         start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
-        tariffs = normalise_tariffs(self.config_entry.options)
+        tariffs = self.config_entry.options[CONF_TARIFFS]
 
         account_id = self.config_entry.data[CONF_ACCOUNT]
         id_e, id_c = self._statistic_ids(account_id)
-        reset_requested = bool(conf.get(CONF_RESET_STATISTICS))
 
         # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
@@ -283,8 +225,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         today_syd = datetime.datetime.now(TZ_SYDNEY).date()
         current_tariff = tariff_for_date(tariffs, today_syd)
         price_kwh = current_tariff[CONF_PRICE_USAGE_DOLLARS]
-        is_rebuilding = force_rebuild or reset_requested
-        clear_before_import = reset_requested
+        is_rebuilding = force_rebuild
+        clear_before_import = False
 
         series_out_of_sync = _statistic_series_out_of_sync(last_ts_e, last_ts_c)
         if series_out_of_sync and not is_rebuilding:
@@ -466,9 +408,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         # Clear statistics only after staging complete replacement history and
         # confirming every existing non-future recorder hour remains covered.
         if clear_before_import:
-            await self._async_clear_imported_statistics(
-                {account_id, conf.get(CONF_RESET_ACCOUNT)}
-            )
+            await self._async_clear_imported_statistics([id_e, id_c])
 
         if st_e_all:
             async_add_external_statistics(

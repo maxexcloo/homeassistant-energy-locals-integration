@@ -3,15 +3,9 @@
 import datetime
 import unittest
 
-from custom_components.energy_locals.const import (
-    CONF_PRICE_SUPPLY_DOLLARS,
-    CONF_PRICE_USAGE_DOLLARS,
-    CONF_START_DATE,
-    CONF_TARIFFS,
-)
+from custom_components.energy_locals.const import CONF_PRICE_USAGE_DOLLARS
 from custom_components.energy_locals.tariffs import (
     TARIFF_EFFECTIVE_FROM,
-    normalise_tariffs,
     tariff_for_date,
     upsert_tariff,
 )
@@ -20,51 +14,11 @@ from custom_components.energy_locals.tariffs import (
 class TariffTests(unittest.TestCase):
     def test_non_finite_prices_are_rejected(self):
         with self.assertRaises(ValueError):
-            normalise_tariffs(
-                {
-                    CONF_START_DATE: "2026-01-10",
-                    CONF_PRICE_USAGE_DOLLARS: float("inf"),
-                    CONF_PRICE_SUPPLY_DOLLARS: 0.82,
-                }
-            )
-
-    def test_legacy_prices_become_initial_tariff(self):
-        tariffs = normalise_tariffs(
-            {
-                CONF_START_DATE: "2026-01-10",
-                CONF_PRICE_USAGE_DOLLARS: 0.31,
-                CONF_PRICE_SUPPLY_DOLLARS: 0.82,
-            }
-        )
-
-        self.assertEqual(
-            tariffs,
-            [
-                {
-                    TARIFF_EFFECTIVE_FROM: "2026-01-10",
-                    CONF_PRICE_USAGE_DOLLARS: 0.31,
-                    CONF_PRICE_SUPPLY_DOLLARS: 0.82,
-                }
-            ],
-        )
+            upsert_tariff([], "2026-01-10", float("inf"), 0.82)
 
     def test_tariff_boundary_uses_local_calendar_date(self):
-        tariffs = normalise_tariffs(
-            {
-                CONF_TARIFFS: [
-                    {
-                        TARIFF_EFFECTIVE_FROM: "2026-01-01",
-                        CONF_PRICE_USAGE_DOLLARS: 0.31,
-                        CONF_PRICE_SUPPLY_DOLLARS: 0.82,
-                    },
-                    {
-                        TARIFF_EFFECTIVE_FROM: "2026-08-01",
-                        CONF_PRICE_USAGE_DOLLARS: 0.37,
-                        CONF_PRICE_SUPPLY_DOLLARS: 1.05,
-                    },
-                ]
-            }
-        )
+        tariffs = upsert_tariff([], "2026-01-01", 0.31, 0.82)
+        tariffs = upsert_tariff(tariffs, "2026-08-01", 0.37, 1.05)
 
         july = tariff_for_date(tariffs, datetime.date(2026, 7, 31))
         august = tariff_for_date(tariffs, datetime.date(2026, 8, 1))
@@ -72,22 +26,8 @@ class TariffTests(unittest.TestCase):
         self.assertEqual(august[CONF_PRICE_USAGE_DOLLARS], 0.37)
 
     def test_upsert_replaces_same_date_and_sorts(self):
-        tariffs = normalise_tariffs(
-            {
-                CONF_TARIFFS: [
-                    {
-                        TARIFF_EFFECTIVE_FROM: "2026-08-01",
-                        CONF_PRICE_USAGE_DOLLARS: 0.37,
-                        CONF_PRICE_SUPPLY_DOLLARS: 1.05,
-                    },
-                    {
-                        TARIFF_EFFECTIVE_FROM: "2026-01-01",
-                        CONF_PRICE_USAGE_DOLLARS: 0.31,
-                        CONF_PRICE_SUPPLY_DOLLARS: 0.82,
-                    },
-                ]
-            }
-        )
+        tariffs = upsert_tariff([], "2026-08-01", 0.37, 1.05)
+        tariffs = upsert_tariff(tariffs, "2026-01-01", 0.31, 0.82)
         tariffs = upsert_tariff(tariffs, "2026-08-01", 0.39, 1.07)
 
         self.assertEqual(
@@ -97,17 +37,7 @@ class TariffTests(unittest.TestCase):
         self.assertEqual(tariffs[-1][CONF_PRICE_USAGE_DOLLARS], 0.39)
 
     def test_no_tariff_before_first_period_is_rejected(self):
-        tariffs = normalise_tariffs(
-            {
-                CONF_TARIFFS: [
-                    {
-                        TARIFF_EFFECTIVE_FROM: "2026-08-01",
-                        CONF_PRICE_USAGE_DOLLARS: 0.37,
-                        CONF_PRICE_SUPPLY_DOLLARS: 1.05,
-                    }
-                ]
-            }
-        )
+        tariffs = upsert_tariff([], "2026-08-01", 0.37, 1.05)
 
         with self.assertRaises(ValueError):
             tariff_for_date(tariffs, datetime.date(2026, 7, 31))

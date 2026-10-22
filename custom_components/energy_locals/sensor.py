@@ -55,9 +55,8 @@ SENSORS = (
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = entry.runtime_data
     async_add_entities(
-        EnergyLocalsSensor(coordinator, entry, description) for description in SENSORS
+        EnergyLocalsSensor(entry.runtime_data, description) for description in SENSORS
     )
 
 
@@ -66,11 +65,10 @@ class EnergyLocalsSensor(EnergyLocalsEntity, SensorEntity):
 
     entity_description: EnergyLocalsSensorEntityDescription
 
-    def __init__(self, coordinator, entry, description):
+    def __init__(self, coordinator, description):
         """Initialise an Energy Locals sensor."""
-        super().__init__(coordinator, entry)
+        super().__init__(coordinator, description.key)
         self.entity_description = description
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
 
     @property
     def native_value(self):

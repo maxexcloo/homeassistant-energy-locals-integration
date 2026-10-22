@@ -4,13 +4,16 @@ import logging
 
 import requests
 
-from .const import DATA_URL_TEMPLATE, LOGIN_URL, PORTAL_URL
-
 _LOGGER = logging.getLogger(__name__)
 
 # Energy Locals may answer a wrong password with a validation error.
 _AUTH_STATUSES = (400, 401, 403)
 _TIMEOUT = 30
+
+API_BASE = "https://uml-myaccount-api-app-au.azurewebsites.net"
+DATA_URL_TEMPLATE = f"{API_BASE}/utility-accounts/{{}}/usage-chart"
+LOGIN_URL = f"{API_BASE}/user/authenticate"
+PORTAL_URL = "https://urban.energylocals.com.au"
 
 
 class EnergyLocalsAPIError(Exception):
@@ -67,11 +70,8 @@ class EnergyLocalsAPI:
         """Authenticate and store the token."""
         try:
             payload = {"password": self._password, "username": self._username}
-            headers = self._get_headers()
-            headers.pop("Authorization", None)
-
             resp = requests.post(
-                LOGIN_URL, json=payload, headers=headers, timeout=_TIMEOUT
+                LOGIN_URL, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
             )
             resp.raise_for_status()
 
@@ -82,7 +82,6 @@ class EnergyLocalsAPI:
             if not token:
                 raise EnergyLocalsAuthError("Login response did not contain a token")
             self._token = token
-            return True
         except requests.exceptions.HTTPError as err:
             if err.response is not None and err.response.status_code in _AUTH_STATUSES:
                 raise EnergyLocalsAuthError(
@@ -157,11 +156,7 @@ class EnergyLocalsAPI:
                 )
             return usage_data
 
-        except (
-            requests.exceptions.HTTPError,
-            requests.exceptions.JSONDecodeError,
-            requests.exceptions.RequestException,
-        ) as err:
+        except requests.exceptions.RequestException as err:
             raise EnergyLocalsAPIError(
                 f"Unable to fetch Energy Locals data for {date_str}"
             ) from err

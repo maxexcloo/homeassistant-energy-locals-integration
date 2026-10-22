@@ -6,14 +6,7 @@ import datetime
 import math
 from typing import Any
 
-from .const import (
-    CONF_PRICE_SUPPLY_DOLLARS,
-    CONF_PRICE_USAGE_DOLLARS,
-    CONF_START_DATE,
-    CONF_TARIFFS,
-    DEFAULT_PRICE_SUPPLY_DOLLARS,
-    DEFAULT_PRICE_USAGE_DOLLARS,
-)
+from .const import CONF_PRICE_SUPPLY_DOLLARS, CONF_PRICE_USAGE_DOLLARS
 
 TARIFF_EFFECTIVE_FROM = "effective_from"
 
@@ -32,31 +25,6 @@ def _tariff(effective_from: str, usage_price: Any, supply_price: Any) -> dict:
         CONF_PRICE_USAGE_DOLLARS: usage,
         CONF_PRICE_SUPPLY_DOLLARS: supply,
     }
-
-
-def normalise_tariffs(config: dict) -> list[dict]:
-    """Return a validated tariff schedule, migrating legacy prices in memory."""
-    raw_tariffs = config.get(CONF_TARIFFS)
-    if raw_tariffs:
-        tariffs = [
-            _tariff(
-                item[TARIFF_EFFECTIVE_FROM],
-                item[CONF_PRICE_USAGE_DOLLARS],
-                item[CONF_PRICE_SUPPLY_DOLLARS],
-            )
-            for item in raw_tariffs
-        ]
-    else:
-        tariffs = [
-            _tariff(
-                config[CONF_START_DATE],
-                config.get(CONF_PRICE_USAGE_DOLLARS, DEFAULT_PRICE_USAGE_DOLLARS),
-                config.get(CONF_PRICE_SUPPLY_DOLLARS, DEFAULT_PRICE_SUPPLY_DOLLARS),
-            )
-        ]
-
-    by_date = {item[TARIFF_EFFECTIVE_FROM]: item for item in tariffs}
-    return [by_date[key] for key in sorted(by_date)]
 
 
 def upsert_tariff(
