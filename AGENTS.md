@@ -1,9 +1,5 @@
 # AGENTS.md
 
-## Structure
-
-- Keep user-visible strings in `translations/en.json`.
-
 ## Behaviour
 
 - Preserve the current `Australia/Sydney` interpretation until provider timezone
