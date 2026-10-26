@@ -13,7 +13,7 @@ Imports interval usage data from [Energy Locals Urban](https://urban.energylocal
 
 ## Installation
 
-Requires Home Assistant 2026.10.2 or newer.
+Requires Home Assistant 2026.10.4 or newer.
 
 ### HACS (Recommended)
 
