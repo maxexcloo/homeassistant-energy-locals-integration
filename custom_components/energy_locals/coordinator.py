@@ -200,6 +200,14 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         }
         return len(intervals) == len(expected) and set(intervals) == expected
 
+    def _result(self, price_kwh, total_cost, total_kwh):
+        return {
+            "last_synced": dt_util.now(),
+            "price": price_kwh,
+            "total_cost": total_cost,
+            "total_kwh": total_kwh,
+        }
+
     async def _async_update_data(self):
         # Home Assistant serialises refreshes. Consume only this refresh's request
         # so a button press during an API await remains queued for the next one.
@@ -212,7 +220,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
         tariffs = self.config_entry.options[CONF_TARIFFS]
 
-        account_id = self.config_entry.data[CONF_ACCOUNT]
+        account_id = conf[CONF_ACCOUNT]
         id_e, id_c = self._statistic_ids(account_id)
 
         # 1. READ DATABASE
@@ -225,6 +233,13 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         today_syd = datetime.datetime.now(TZ_SYDNEY).date()
         current_tariff = tariff_for_date(tariffs, today_syd)
         price_kwh = current_tariff[CONF_PRICE_USAGE_DOLLARS]
+        last_day_syd = (
+            datetime.datetime.fromtimestamp(last_ts_e, tz=datetime.UTC)
+            .astimezone(TZ_SYDNEY)
+            .date()
+            if last_ts_e
+            else None
+        )
         is_rebuilding = force_rebuild
         clear_before_import = False
 
@@ -238,28 +253,21 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             clear_before_import = True
 
         # Detect database corruption without treating valid zero usage as corrupt.
-        if not is_rebuilding and last_ts_e:
-            last_dt_syd = datetime.datetime.fromtimestamp(
-                last_ts_e, tz=datetime.UTC
-            ).astimezone(TZ_SYDNEY)
-            if last_dt_syd.date() >= today_syd:
-                _LOGGER.warning(
-                    "Invalid future data detected (%s); forcing automatic rebuild",
-                    last_dt_syd.date(),
-                )
-                is_rebuilding = True
-                clear_before_import = True
+        if not is_rebuilding and last_day_syd and last_day_syd >= today_syd:
+            _LOGGER.warning(
+                "Invalid future data detected (%s); forcing automatic rebuild",
+                last_day_syd,
+            )
+            is_rebuilding = True
+            clear_before_import = True
 
         # 2. DETERMINE START DATE
         if is_rebuilding:
             curr = start_date_raw
             g_kwh = 0.0
             g_cost = 0.0
-        elif last_ts_e:
-            last_dt_syd = datetime.datetime.fromtimestamp(
-                last_ts_e, tz=datetime.UTC
-            ).astimezone(TZ_SYDNEY)
-            curr = last_dt_syd.date() + timedelta(days=1)
+        elif last_day_syd:
+            curr = last_day_syd + timedelta(days=1)
         else:
             curr = start_date_raw
 
@@ -269,12 +277,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed("No replacement history is available to import")
             if last_ts_e is None:
                 raise UpdateFailed("No valid history found")
-            return {
-                "last_synced": dt_util.now(),
-                "price": price_kwh,
-                "total_cost": g_cost,
-                "total_kwh": g_kwh,
-            }
+            return self._result(price_kwh, g_cost, g_kwh)
 
         _LOGGER.info("Syncing Energy Locals statistics from %s", curr)
 
@@ -391,8 +394,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             curr += timedelta(days=1)
 
         # 5. FINAL SAFETY & DB WRITE
-        if clear_before_import and not st_e_all:
-            raise UpdateFailed("No replacement history is available to import")
         if not st_e_all and last_ts_e is None:
             raise UpdateFailed("No valid history found")
 
@@ -421,8 +422,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 ),
                 st_e_all,
             )
-
-        if st_c_all:
             async_add_external_statistics(
                 self.hass,
                 _statistic_metadata(
@@ -434,9 +433,4 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 st_c_all,
             )
 
-        return {
-            "last_synced": dt_util.now(),
-            "price": price_kwh,
-            "total_cost": g_cost,
-            "total_kwh": g_kwh,
-        }
+        return self._result(price_kwh, g_cost, g_kwh)
