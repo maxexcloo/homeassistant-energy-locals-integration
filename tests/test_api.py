@@ -26,7 +26,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
         for status_code in (400, 401, 403):
             with (
                 self.subTest(status_code=status_code),
-                patch.object(requests, "post") as post,
+                patch.object(requests.Session, "post") as post,
             ):
                 response = Mock(status_code=status_code)
                 response.raise_for_status.side_effect = requests.exceptions.HTTPError(
@@ -38,7 +38,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
                     self.api.login()
 
     def test_login_server_error_is_not_an_auth_failure(self):
-        with patch.object(requests, "post") as post:
+        with patch.object(requests.Session, "post") as post:
             response = Mock(status_code=500)
             response.raise_for_status.side_effect = requests.exceptions.HTTPError(
                 response=response
@@ -50,7 +50,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
             self.assertNotIsInstance(raised.exception, EnergyLocalsAuthError)
 
     def test_usage_rejects_inaccessible_account(self):
-        with patch.object(requests, "post") as post:
+        with patch.object(requests.Session, "post") as post:
             self.api._token = "token"
             post.return_value = Mock(status_code=403)
 
@@ -59,7 +59,10 @@ class EnergyLocalsAPITests(unittest.TestCase):
 
     def test_usage_rate_limit_reports_retry_after(self):
         for header, retry_after in (({"Retry-After": "30"}, 30.0), ({}, None)):
-            with self.subTest(header=header), patch.object(requests, "post") as post:
+            with (
+                self.subTest(header=header),
+                patch.object(requests.Session, "post") as post,
+            ):
                 self.api._token = "token"
                 post.return_value = Mock(headers=header, status_code=429)
 
@@ -68,7 +71,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
                 self.assertEqual(raised.exception.retry_after, retry_after)
 
     def test_usage_transport_failure_is_not_empty_data(self):
-        with patch.object(requests, "post") as post:
+        with patch.object(requests.Session, "post") as post:
             self.api._token = "token"
             post.side_effect = requests.exceptions.ConnectionError("offline")
 
@@ -78,7 +81,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
             self.assertEqual(post.call_count, 1)
 
     def test_valid_empty_usage_response_remains_empty(self):
-        with patch.object(requests, "post") as post:
+        with patch.object(requests.Session, "post") as post:
             self.api._token = "token"
             response = Mock(status_code=200)
             response.raise_for_status.return_value = None
@@ -89,7 +92,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
             post.assert_called_once()
 
     def test_invalid_usage_shape_is_an_api_failure(self):
-        with patch.object(requests, "post") as post:
+        with patch.object(requests.Session, "post") as post:
             self.api._token = "token"
             response = Mock(status_code=200)
             response.raise_for_status.return_value = None
@@ -101,7 +104,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
 
     def test_rejected_refreshed_token_is_an_auth_failure(self):
         with (
-            patch.object(requests, "post") as post,
+            patch.object(requests.Session, "post") as post,
             patch.object(self.api, "login", return_value=True) as login,
         ):
             self.api._token = "expired"
@@ -114,7 +117,7 @@ class EnergyLocalsAPITests(unittest.TestCase):
 
     def test_expired_token_is_refreshed_once(self):
         with (
-            patch.object(requests, "post") as post,
+            patch.object(requests.Session, "post") as post,
             patch.object(self.api, "login", return_value=True) as login,
         ):
             self.api._token = "expired"

@@ -51,6 +51,8 @@ class EnergyLocalsAPI:
         self._username = username
         self._password = password
         self._account_id = account_id
+        # Reuse connections across the one-request-per-day history import.
+        self._session = requests.Session()
         self._token = None
 
     def _get_headers(self):
@@ -70,7 +72,7 @@ class EnergyLocalsAPI:
         """Authenticate and store the token."""
         try:
             payload = {"password": self._password, "username": self._username}
-            resp = requests.post(
+            resp = self._session.post(
                 LOGIN_URL, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
             )
             resp.raise_for_status()
@@ -110,7 +112,7 @@ class EnergyLocalsAPI:
         }
 
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 url, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
             )
 
@@ -118,7 +120,7 @@ class EnergyLocalsAPI:
                 self._token = None
                 _LOGGER.info("Energy Locals token expired; authenticating again")
                 self.login()
-                resp = requests.post(
+                resp = self._session.post(
                     url, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
                 )
                 if resp.status_code == 401:

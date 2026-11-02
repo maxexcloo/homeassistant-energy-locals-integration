@@ -2,7 +2,6 @@
 
 import datetime
 
-import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
@@ -150,9 +149,7 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(
-                    CONF_USERNAME, default=entry.data[CONF_USERNAME]
-                ): cv.string,
+                vol.Required(CONF_USERNAME, default=entry.data[CONF_USERNAME]): str,
                 vol.Required(CONF_PASSWORD): str,
             }
         )
