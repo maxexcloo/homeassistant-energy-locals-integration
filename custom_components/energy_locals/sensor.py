@@ -27,29 +27,27 @@ SENSORS = (
         translation_key="cost",
         device_class=SensorDeviceClass.MONETARY,
         native_unit_of_measurement="AUD",
-        value_fn=lambda data: (
-            round(data["total_cost"], 2) if data.get("total_cost") is not None else None
-        ),
+        value_fn=lambda data: round(data["total_cost"], 2),
     ),
     EnergyLocalsSensorEntityDescription(
         key="last_synced",
         translation_key="last_synced",
         device_class=SensorDeviceClass.TIMESTAMP,
-        value_fn=lambda data: data.get("last_synced"),
+        value_fn=lambda data: data["last_synced"],
     ),
     EnergyLocalsSensorEntityDescription(
         key="price",
         translation_key="usage_price",
         native_unit_of_measurement="AUD/kWh",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda data: data.get("price"),
+        value_fn=lambda data: data["price"],
     ),
     EnergyLocalsSensorEntityDescription(
         key="usage",
         translation_key="usage",
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement="kWh",
-        value_fn=lambda data: data.get("total_kwh"),
+        value_fn=lambda data: data["total_kwh"],
     ),
 )
 

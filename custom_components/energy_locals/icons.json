@@ -1,0 +1,9 @@
+{
+  "entity": {
+    "button": {
+      "rebuild_statistics": {
+        "default": "mdi:database-refresh"
+      }
+    }
+  }
+}

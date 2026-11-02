@@ -61,9 +61,11 @@ recalculate the affected historical cost.
 ## Changing the Import Start Date
 
 Use **Reconfigure** on the Energy Locals entry to change the import start date.
-History is then rebuilt from the new date. If that history is incomplete, the
-existing statistics are kept. Days containing duplicate or off-grid intervals are
-not imported; missing history remains unavailable rather than showing zero.
+An earlier date rebuilds history from the new date; if that history is
+incomplete, the existing statistics are kept. A later date keeps the existing
+statistics, as a rebuild never removes history that's already imported. Days
+containing duplicate or off-grid intervals are not imported; missing history
+remains unavailable rather than showing zero.
 
 To change the utility account, remove the entry and add it again.
 

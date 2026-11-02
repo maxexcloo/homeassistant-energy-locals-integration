@@ -10,7 +10,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class EnergyLocalsRebuildButton(EnergyLocalsEntity, ButtonEntity):
-    _attr_icon = "mdi:database-refresh"
     _attr_translation_key = "rebuild_statistics"
 
     async def async_press(self) -> None:

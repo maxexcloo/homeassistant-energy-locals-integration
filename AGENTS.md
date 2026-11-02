@@ -2,8 +2,8 @@
 
 ## Behaviour
 
-- Preserve the current `Australia/Sydney` interpretation until provider timezone
-  semantics are verified against representative API responses (issue #11).
+- Read Energy Locals interval timestamps as `Australia/Sydney` local time,
+  including daylight saving.
 - Keep missing data as `None`; never substitute zero for unavailable usage or cost.
 - Never clear statistics before replacement data has been fetched and staged.
 - Automatic repairs and manual rebuilds must not overwrite existing statistics when

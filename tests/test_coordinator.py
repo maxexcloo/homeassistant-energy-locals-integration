@@ -30,6 +30,10 @@ from custom_components.energy_locals.const import (
 from custom_components.energy_locals.coordinator import (
     EnergyLocalsCoordinator,
     UpdateFailed,
+    _extract_value,
+    _interval_starts,
+    _is_day_complete,
+    _statistic_ids,
     _statistic_metadata,
     _statistic_series_out_of_sync,
 )
@@ -71,6 +75,11 @@ def _usage_data(day, total=1.0, *, offset=True):
         }
         for index in range(count)
     ]
+
+
+def _starts(data):
+    """Return the parsed interval starts of usage data."""
+    return [start for _point, start in _interval_starts(data)]
 
 
 @pytest.mark.parametrize(
@@ -129,17 +138,17 @@ class TestEnergyLocalsCoordinator:
             yield
 
     async def test_usage_values_come_from_the_chart_y_value(self):
-        assert self.coordinator._extract_value({"y": "1.5"}) == 1.5
-        assert self.coordinator._extract_value({"y": -1}) == 0.0
+        assert _extract_value({"y": "1.5"}) == 1.5
+        assert _extract_value({"y": -1}) == 0.0
         for point in ({"value": 1.0}, {"y": None}, {"y": "nan"}):
             with pytest.raises(ValueError):
-                self.coordinator._extract_value(point)
+                _extract_value(point)
 
     async def test_completeness_requires_the_requested_local_day(self):
         next_day = self.day + datetime.timedelta(days=1)
         data = _usage_data(next_day)
-        assert not self.coordinator._is_day_complete(data, self.day)
-        assert self.coordinator._is_day_complete(data, next_day)
+        assert not _is_day_complete(_starts(data), self.day)
+        assert _is_day_complete(_starts(data), next_day)
 
     @pytest.mark.parametrize(
         ("day", "interval_count"),
@@ -155,9 +164,9 @@ class TestEnergyLocalsCoordinator:
     ):
         data = _usage_data(day, offset=offset)
         assert len(data) == interval_count
-        assert self.coordinator._is_day_complete(data, day)
+        assert _is_day_complete(_starts(data), day)
         data.pop(interval_count // 2)
-        assert not self.coordinator._is_day_complete(data, day)
+        assert not _is_day_complete(_starts(data), day)
 
     @pytest.mark.parametrize("invalid", ["duplicate", "off_grid", "wrong_day"])
     async def test_extra_intervals_do_not_publish_inflated_history(self, invalid):
@@ -209,11 +218,13 @@ class TestEnergyLocalsCoordinator:
             side_effect=[(12.0, last_start), (4.0, last_start)]
         )
         self.api.get_data.return_value = _usage_data(self.day, total=2.0)
-        self.coordinator._async_clear_imported_statistics = AsyncMock()
-        result = await self.coordinator._perform_sync(force_rebuild=True)
+        with patch(
+            "custom_components.energy_locals.coordinator.get_instance"
+        ) as get_instance:
+            result = await self.coordinator._perform_sync(force_rebuild=True)
         assert result["total_kwh"] == pytest.approx(2.0)
         assert self.add_external_statistics.call_count == 2
-        self.coordinator._async_clear_imported_statistics.assert_not_awaited()
+        get_instance.return_value.async_clear_statistics.assert_not_called()
 
     async def test_button_rebuild_waits_for_an_ongoing_refresh(self):
         started = asyncio.Event()
@@ -304,7 +315,7 @@ class TestRecorderRebuilds:
         self.entry.add_to_hass(hass)
         self.api = Mock()
         self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)
-        self.statistic_ids = self.coordinator._statistic_ids("123")
+        self.statistic_ids = _statistic_ids("123")
 
     async def _seed_statistics(self, usage_days, cost_days):
         for statistic_id, days, unit, unit_class in (
