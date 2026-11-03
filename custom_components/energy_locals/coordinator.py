@@ -17,6 +17,7 @@ from homeassistant.components.recorder.models import (
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistic_during_period,
     statistics_during_period,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -45,7 +46,8 @@ from .tariffs import tariff_for_date
 
 _LOGGER = logging.getLogger(__name__)
 
-# Wait for recent incomplete days; older gaps can be skipped on initial imports.
+# Energy Locals reports readings it has not published yet as zero, so recent days
+# are fetched again on every sync. Older gaps can be skipped on initial imports.
 _DATA_GRACE_DAYS = 3
 _INTERVAL = timedelta(minutes=30)
 # Retry each day's request with doubling delays, honouring a bounded Retry-After.
@@ -157,6 +159,21 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
         return None, None
 
+    async def _async_change_since(self, statistic_id, start):
+        try:
+            stats = await get_instance(self.hass).async_add_executor_job(
+                statistic_during_period,
+                self.hass,
+                start,
+                None,
+                statistic_id,
+                {"change"},
+                None,
+            )
+        except Exception as err:
+            raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
+        return stats["change"] or 0.0
+
     async def _async_fetch_day(self, day):
         """Fetch one day's intervals, retrying transient API failures."""
         for attempt in range(_RETRY_ATTEMPTS):
@@ -255,7 +272,18 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             g_kwh = 0.0
             g_cost = 0.0
         elif last_day_syd:
-            curr = last_day_syd + timedelta(days=1)
+            curr = max(
+                start_date_raw,
+                min(
+                    last_day_syd + timedelta(days=1),
+                    today_syd - timedelta(days=_DATA_GRACE_DAYS),
+                ),
+            )
+            if curr <= last_day_syd:
+                # Rows are keyed by hour, so the refetched days replace their rows.
+                since = datetime.datetime.combine(curr, datetime.time(), TZ_SYDNEY)
+                g_kwh -= await self._async_change_since(id_e, since)
+                g_cost -= await self._async_change_since(id_c, since)
         else:
             curr = start_date_raw
 
@@ -278,6 +306,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 # sums; recent data may not be published yet, so retry next sync.
                 if (today_syd - curr).days <= _DATA_GRACE_DAYS:
                     _LOGGER.debug("Day %s is not complete yet, stopping sync", curr)
+                    # Rewriting only the earlier refetched days would leave later
+                    # rows with stale sums, so keep everything until the next sync.
+                    if not is_rebuilding and last_day_syd and curr <= last_day_syd:
+                        return _result(price_kwh, db_cost, db_kwh)
                     break
                 # A rebuild must not overwrite later cumulative rows when an older
                 # contribution is no longer available.

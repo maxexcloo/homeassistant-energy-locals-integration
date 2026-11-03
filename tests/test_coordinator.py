@@ -351,17 +351,21 @@ class TestRecorderRebuilds:
             {"state", "sum"},
         )
 
-    async def test_running_totals_continue_across_days_and_syncs(self, freezer):
-        """Each day adds to the previous total, including after a later sync."""
+    async def test_later_syncs_heal_recent_days_without_duplicates(self, freezer):
+        """Recent days are fetched again, so late readings replace early zeros."""
         self.api.get_data.side_effect = [
             _usage_data(self.first_day, total=1.0),
-            _usage_data(self.day, total=2.0),
+            _usage_data(self.day, total=0.5),
         ]
         await self.coordinator._perform_sync()
 
         freezer.move_to("2026-10-19T00:00:00+00:00")
         next_day = self.day + datetime.timedelta(days=1)
-        self.api.get_data.side_effect = [_usage_data(next_day, total=4.0)]
+        self.api.get_data.side_effect = [
+            _usage_data(self.first_day, total=1.0),
+            _usage_data(self.day, total=2.0),
+            _usage_data(next_day, total=4.0),
+        ]
         await async_wait_recording_done(self.hass)
         result = await self.coordinator._perform_sync()
 
@@ -389,6 +393,21 @@ class TestRecorderRebuilds:
             assert sums == sorted(sums)
         assert result["total_kwh"] == pytest.approx(7.0)
         assert result["total_cost"] == pytest.approx(5.333)
+
+        # A later window starts after kept rows and continues from their total.
+        freezer.move_to("2026-10-20T00:00:00+00:00")
+        last_day = next_day + datetime.timedelta(days=1)
+        self.api.get_data.side_effect = [
+            _usage_data(self.day, total=2.0),
+            _usage_data(next_day, total=4.0),
+            _usage_data(last_day, total=8.0),
+        ]
+        await async_wait_recording_done(self.hass)
+        result = await self.coordinator._perform_sync()
+        rows = (await self._read_statistics())[self.statistic_ids[0]]
+        assert len(rows) == 96
+        assert rows[-1]["sum"] == pytest.approx(15.0)
+        assert result["total_kwh"] == pytest.approx(15.0)
 
     @pytest.mark.parametrize("rebuild", ["automatic", "button"])
     @pytest.mark.parametrize("missing", ["day", "hour", "interval"])
