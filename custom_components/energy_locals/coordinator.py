@@ -47,7 +47,6 @@ _LOGGER = logging.getLogger(__name__)
 
 # Wait for recent incomplete days; older gaps can be skipped on initial imports.
 _DATA_GRACE_DAYS = 3
-# Energy Locals reports usage in half-hour intervals.
 _INTERVAL = timedelta(minutes=30)
 # Retry each day's request with doubling delays, honouring a bounded Retry-After.
 _RETRY_ATTEMPTS = 3
@@ -225,7 +224,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         account_id = conf[CONF_ACCOUNT]
         id_e, id_c = _statistic_ids(account_id)
 
-        # 1. READ DATABASE
         db_kwh, last_ts_e = await self._get_db_total(id_e)
         db_cost, last_ts_c = await self._get_db_total(id_c)
 
@@ -254,7 +252,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             is_rebuilding = True
             clear_before_import = True
 
-        # Detect database corruption without treating valid zero usage as corrupt.
         if not is_rebuilding and last_day_syd and last_day_syd >= today_syd:
             _LOGGER.warning(
                 "Invalid future data detected (%s); forcing automatic rebuild",
@@ -263,7 +260,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             is_rebuilding = True
             clear_before_import = True
 
-        # 2. DETERMINE START DATE
         if is_rebuilding:
             curr = start_date_raw
             g_kwh = 0.0
@@ -273,7 +269,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         else:
             curr = start_date_raw
 
-        # 3. UP-TO-DATE CHECK
         if curr >= today_syd:
             if is_rebuilding:
                 raise UpdateFailed("No replacement history is available to import")
@@ -286,7 +281,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         st_e_all = []
         st_c_all = []
 
-        # 4. DATA IMPORT LOOP
         while curr < today_syd:
             intervals = _interval_starts(await self._async_fetch_day(curr))
             if not _is_day_complete([start for _point, start in intervals], curr):
@@ -342,7 +336,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
             curr += timedelta(days=1)
 
-        # 5. FINAL SAFETY & DB WRITE
         if not st_e_all and last_ts_e is None:
             raise UpdateFailed("No valid history found")
 
