@@ -56,24 +56,17 @@ def _entry(start_date):
     )
 
 
-def _usage_data(day, total=1.0, *, offset=True):
-    """Build a full local day of half-hour readings, optionally without offsets."""
-    start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
-        datetime.UTC
-    )
-    end = datetime.datetime.combine(
-        day + datetime.timedelta(days=1), datetime.time(), TZ_SYDNEY
-    ).astimezone(datetime.UTC)
-    count = int((end - start).total_seconds() / 1800)
+def _usage_data(day, total=1.0):
+    """Build a day of readings as Energy Locals sends them: 48 local half-hours."""
+    midnight = datetime.datetime.combine(day, datetime.time())
     return [
         {
-            "dateValue": (start + datetime.timedelta(minutes=30 * index))
-            .astimezone(TZ_SYDNEY)
-            .replace(tzinfo=None if not offset else TZ_SYDNEY)
-            .isoformat(),
-            "y": total / count,
+            "dateValue": (
+                midnight + datetime.timedelta(minutes=30 * index)
+            ).isoformat(),
+            "y": total / 48,
         }
-        for index in range(count)
+        for index in range(48)
     ]
 
 
@@ -97,25 +90,32 @@ def test_statistic_series_out_of_sync(usage_start, cost_start, out_of_sync):
     assert _statistic_series_out_of_sync(usage_start, cost_start) is out_of_sync
 
 
-@pytest.mark.parametrize("offset", [False, True])
-async def test_daylight_saving_end_imports_the_repeated_hour(hass, freezer, offset):
-    """Both 02:00 hours on the day daylight saving ends become separate rows."""
-    day = datetime.date(2026, 4, 5)
-    freezer.move_to("2026-04-06T12:00:00+10:00")
+@pytest.mark.parametrize(
+    ("day", "hours", "repeated_hour"),
+    [
+        # The single 02:00 reading lands on the standard-time hour.
+        (datetime.date(2026, 4, 5), 24, "2026-04-04T16:00:00+00:00"),
+        (datetime.date(2026, 10, 4), 23, None),
+    ],
+)
+async def test_daylight_saving_days_import(hass, freezer, day, hours, repeated_hour):
+    """Daylight saving days import from the 48 readings Energy Locals sends."""
+    freezer.move_to(f"{day + datetime.timedelta(days=1)}T12:00:00+10:00")
     entry = _entry(day)
     entry.add_to_hass(hass)
     api = AsyncMock()
-    api.get_data.return_value = _usage_data(day, total=25.0, offset=offset)
+    api.get_data.return_value = _usage_data(day, total=48.0)
     coordinator = EnergyLocalsCoordinator(hass, api, entry)
     coordinator._get_db_total = AsyncMock(side_effect=[(None, None), (None, None)])
     with patch(
         "custom_components.energy_locals.coordinator.async_add_external_statistics"
     ) as add_statistics:
         result = await coordinator._perform_sync()
-    usage = add_statistics.call_args_list[0].args[2]
-    assert len(usage) == 25
-    assert len({row["start"] for row in usage}) == 25
-    assert result["total_kwh"] == pytest.approx(25.0)
+    starts = [row["start"] for row in add_statistics.call_args_list[0].args[2]]
+    assert len(set(starts)) == len(starts) == hours
+    if repeated_hour:
+        assert datetime.datetime.fromisoformat(repeated_hour) in starts
+    assert result["total_kwh"] == pytest.approx(48.0)
 
 
 class TestEnergyLocalsCoordinator:
@@ -151,21 +151,13 @@ class TestEnergyLocalsCoordinator:
         assert _is_day_complete(_starts(data), next_day)
 
     @pytest.mark.parametrize(
-        ("day", "interval_count"),
-        [
-            (datetime.date(2026, 4, 5), 50),
-            (datetime.date(2026, 10, 4), 46),
-            (datetime.date(2026, 10, 17), 48),
-        ],
+        "day",
+        [datetime.date(2026, 4, 5), datetime.date(2026, 10, 4)],
     )
-    @pytest.mark.parametrize("offset", [False, True])
-    async def test_completeness_accounts_for_daylight_saving(
-        self, day, interval_count, offset
-    ):
-        data = _usage_data(day, offset=offset)
-        assert len(data) == interval_count
+    async def test_completeness_accounts_for_daylight_saving(self, day):
+        data = _usage_data(day)
         assert _is_day_complete(_starts(data), day)
-        data.pop(interval_count // 2)
+        data.pop(24)
         assert not _is_day_complete(_starts(data), day)
 
     @pytest.mark.parametrize("invalid", ["duplicate", "off_grid", "wrong_day"])

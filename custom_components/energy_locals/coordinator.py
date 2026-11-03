@@ -64,22 +64,15 @@ def _statistic_series_out_of_sync(
 
 
 def _interval_starts(usage_data: list) -> list[tuple[dict, datetime.datetime]]:
-    """Return each interval with its UTC start, skipping malformed points."""
+    """Return each interval with its local wall-clock start, skipping malformed points."""
     intervals = []
-    seen = set()
     for point in usage_data:
         try:
             start = datetime.datetime.fromisoformat(point["dateValue"])
         except KeyError, ValueError, TypeError:
             _LOGGER.debug("Skipping malformed data point: %s", point)
             continue
-        if not start.tzinfo:
-            # Sydney wall times repeat when daylight saving ends. Without an
-            # offset only order separates them: a repeat is the standard-time one.
-            local_start = start.replace(tzinfo=TZ_SYDNEY, fold=int(start in seen))
-            seen.add(start)
-            start = local_start
-        intervals.append((point, start.astimezone(datetime.UTC)))
+        intervals.append((point, start))
     return intervals
 
 
@@ -95,16 +88,13 @@ def _extract_value(point):
 
 
 def _is_day_complete(starts: list[datetime.datetime], day: datetime.date) -> bool:
-    """Require every half-hour interval, including daylight saving transitions."""
-    start = datetime.datetime.combine(day, datetime.time(), TZ_SYDNEY).astimezone(
-        datetime.UTC
-    )
-    end = datetime.datetime.combine(
-        day + timedelta(days=1), datetime.time(), TZ_SYDNEY
-    ).astimezone(datetime.UTC)
-    expected = {
-        start + index * _INTERVAL for index in range((end - start) // _INTERVAL)
-    }
+    """Require each of the day's 48 wall-clock half-hours exactly once.
+
+    Energy Locals reports 48 every day: the hour skipped when daylight saving
+    starts reads zero, and the hour repeated when it ends appears once.
+    """
+    midnight = datetime.datetime.combine(day, datetime.time())
+    expected = {midnight + index * _INTERVAL for index in range(48)}
     return len(starts) == len(expected) and set(starts) == expected
 
 
@@ -303,7 +293,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             day_tariff = tariff_for_date(tariffs, curr)
 
             for p, start in intervals:
-                t_utc = start.replace(minute=0, second=0, microsecond=0)
+                # Read a repeated wall time as standard time, as earlier imports did.
+                t_utc = start.replace(minute=0, tzinfo=TZ_SYDNEY, fold=1).astimezone(
+                    datetime.UTC
+                )
 
                 if t_utc not in buckets:
                     buckets[t_utc] = {"cost": 0.0, "kwh": 0.0}
