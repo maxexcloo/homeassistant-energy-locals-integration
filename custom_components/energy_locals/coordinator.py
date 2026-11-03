@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import logging
 import math
+from collections import defaultdict
 from datetime import timedelta
 
 from homeassistant.components.recorder import get_instance
@@ -54,15 +55,6 @@ _INTERVAL = timedelta(minutes=30)
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY = 2
 _RETRY_MAX_DELAY = 60
-
-
-def _statistic_series_out_of_sync(
-    usage_start: float | None, cost_start: float | None
-) -> bool:
-    """Return whether paired usage and cost series need rebuilding."""
-    if (usage_start is None) != (cost_start is None):
-        return True
-    return usage_start is not None and usage_start != cost_start
 
 
 def _interval_starts(usage_data: list) -> list[tuple[dict, datetime.datetime]]:
@@ -152,9 +144,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             stats = await recorder.async_add_executor_job(
                 get_last_statistics, self.hass, 1, statistic_id, True, {"sum", "start"}
             )
-            if stats and statistic_id in stats and stats[statistic_id]:
-                record = stats[statistic_id][0]
-                return record.get("sum"), record.get("start")
+            if rows := stats.get(statistic_id):
+                return rows[0].get("sum"), rows[0].get("start")
         except Exception as err:
             raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
         return None, None
@@ -250,8 +241,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         is_rebuilding = force_rebuild
         clear_before_import = False
 
-        series_out_of_sync = _statistic_series_out_of_sync(last_ts_e, last_ts_c)
-        if series_out_of_sync and not is_rebuilding:
+        # Paired usage and cost series must end on the same hour.
+        if last_ts_e != last_ts_c and not is_rebuilding:
             _LOGGER.warning(
                 "Energy Locals usage and cost statistics are out of sync; "
                 "staging an automatic rebuild"
@@ -321,7 +312,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 curr += timedelta(days=1)
                 continue
 
-            buckets = {}
+            buckets = defaultdict(float)
             day_tariff = tariff_for_date(tariffs, curr)
 
             for p, start in intervals:
@@ -329,35 +320,24 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 t_utc = start.replace(minute=0, tzinfo=TZ_SYDNEY, fold=1).astimezone(
                     datetime.UTC
                 )
-
-                if t_utc not in buckets:
-                    buckets[t_utc] = {"cost": 0.0, "kwh": 0.0}
-
                 try:
-                    val = _extract_value(p)
+                    buckets[t_utc] += _extract_value(p)
                 except ValueError as err:
                     raise UpdateFailed(
                         f"Invalid Energy Locals usage interval for {curr}"
                     ) from err
-                buckets[t_utc]["kwh"] += val
-                buckets[t_utc]["cost"] += val * day_tariff[CONF_PRICE_USAGE_DOLLARS]
 
-            first_key = min(buckets)
-            buckets[first_key]["cost"] += day_tariff[CONF_PRICE_SUPPLY_DOLLARS]
-
-            st_e, st_c = [], []
-            for t in sorted(buckets.keys()):
-                g_kwh += buckets[t]["kwh"]
-                g_cost += buckets[t]["cost"]
-                st_e.append(
+            # The daily supply charge is added to the day's first hour.
+            g_cost += day_tariff[CONF_PRICE_SUPPLY_DOLLARS]
+            for t in sorted(buckets):
+                g_kwh += buckets[t]
+                g_cost += buckets[t] * day_tariff[CONF_PRICE_USAGE_DOLLARS]
+                st_e_all.append(
                     StatisticData(start=t, state=round(g_kwh, 3), sum=round(g_kwh, 3))
                 )
-                st_c.append(
+                st_c_all.append(
                     StatisticData(start=t, state=round(g_cost, 3), sum=round(g_cost, 3))
                 )
-
-            st_e_all.extend(st_e)
-            st_c_all.extend(st_c)
 
             curr += timedelta(days=1)
 
