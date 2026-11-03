@@ -168,6 +168,25 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
         return None, None
 
+    async def _async_fetch_day(self, day):
+        """Fetch one day's intervals, retrying transient API failures."""
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                return await self.hass.async_add_executor_job(self.api.get_data, day)
+            except EnergyLocalsAuthError as err:
+                raise ConfigEntryAuthFailed(
+                    "Energy Locals credentials are no longer valid"
+                ) from err
+            except EnergyLocalsAPIError as err:
+                if attempt == _RETRY_ATTEMPTS - 1:
+                    raise UpdateFailed(
+                        f"Unable to fetch Energy Locals data for {day}"
+                    ) from err
+                delay = _RETRY_DELAY * 2**attempt
+                if isinstance(err, EnergyLocalsRateLimitError) and err.retry_after:
+                    delay = err.retry_after
+                await asyncio.sleep(min(delay, _RETRY_MAX_DELAY))
+
     async def _async_validate_replacement(self, statistic_ids, statistics, end):
         """Require replacement rows for every existing, non-future recorder hour."""
         try:
@@ -269,27 +288,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         # 4. DATA IMPORT LOOP
         while curr < today_syd:
-            for attempt in range(_RETRY_ATTEMPTS):
-                try:
-                    usage_data = await self.hass.async_add_executor_job(
-                        self.api.get_data, curr
-                    )
-                    break
-                except EnergyLocalsAuthError as err:
-                    raise ConfigEntryAuthFailed(
-                        "Energy Locals credentials are no longer valid"
-                    ) from err
-                except EnergyLocalsAPIError as err:
-                    if attempt == _RETRY_ATTEMPTS - 1:
-                        raise UpdateFailed(
-                            f"Unable to fetch Energy Locals data for {curr}"
-                        ) from err
-                    delay = _RETRY_DELAY * 2**attempt
-                    if isinstance(err, EnergyLocalsRateLimitError) and err.retry_after:
-                        delay = err.retry_after
-                    await asyncio.sleep(min(delay, _RETRY_MAX_DELAY))
-
-            intervals = _interval_starts(usage_data)
+            intervals = _interval_starts(await self._async_fetch_day(curr))
             if not _is_day_complete([start for _point, start in intervals], curr):
                 # Stop before a missing or incomplete day can corrupt subsequent
                 # sums; recent data may not be published yet, so retry next sync.
