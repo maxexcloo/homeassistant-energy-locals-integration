@@ -2,7 +2,7 @@
 
 import asyncio
 import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.components.recorder.statistics import (
@@ -104,7 +104,7 @@ async def test_daylight_saving_end_imports_the_repeated_hour(hass, freezer, offs
     freezer.move_to("2026-04-06T12:00:00+10:00")
     entry = _entry(day)
     entry.add_to_hass(hass)
-    api = Mock()
+    api = AsyncMock()
     api.get_data.return_value = _usage_data(day, total=25.0, offset=offset)
     coordinator = EnergyLocalsCoordinator(hass, api, entry)
     coordinator._get_db_total = AsyncMock(side_effect=[(None, None), (None, None)])
@@ -125,7 +125,7 @@ class TestEnergyLocalsCoordinator:
     async def setup_coordinator(self, hass):
         """Create a real coordinator and mock only external API/recorder writes."""
         self.day = datetime.datetime.now(TZ_SYDNEY).date() - datetime.timedelta(days=1)
-        self.api = Mock()
+        self.api = AsyncMock()
         self.hass = hass
         self.entry = _entry(self.day)
         self.entry.add_to_hass(hass)
@@ -313,7 +313,7 @@ class TestRecorderRebuilds:
         self.first_day = self.day - datetime.timedelta(days=1)
         self.entry = _entry(self.first_day)
         self.entry.add_to_hass(hass)
-        self.api = Mock()
+        self.api = AsyncMock()
         self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)
         self.statistic_ids = _statistic_ids("123")
 

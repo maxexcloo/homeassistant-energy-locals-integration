@@ -1,12 +1,17 @@
 """Tests for Energy Locals API failure handling."""
 
 import datetime
-import unittest
-from unittest.mock import Mock, patch
 
-import requests
+import pytest
+from aiohttp import ClientConnectionError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMockResponse,
+)
 
 from custom_components.energy_locals.api import (
+    DATA_URL_TEMPLATE,
+    LOGIN_URL,
     EnergyLocalsAccountError,
     EnergyLocalsAPI,
     EnergyLocalsAPIError,
@@ -14,122 +19,94 @@ from custom_components.energy_locals.api import (
     EnergyLocalsRateLimitError,
 )
 
-
-class EnergyLocalsAPITests(unittest.TestCase):
-    """Exercise API response classification without making network requests."""
-
-    def setUp(self):
-        self.api = EnergyLocalsAPI("user@example.com", "secret", "123")
-        self.day = datetime.date(2026, 8, 8)
-
-    def test_login_rejects_invalid_credentials(self):
-        for status_code in (400, 401, 403):
-            with (
-                self.subTest(status_code=status_code),
-                patch.object(requests.Session, "post") as post,
-            ):
-                response = Mock(status_code=status_code)
-                response.raise_for_status.side_effect = requests.exceptions.HTTPError(
-                    response=response
-                )
-                post.return_value = response
-
-                with self.assertRaises(EnergyLocalsAuthError):
-                    self.api.login()
-
-    def test_login_server_error_is_not_an_auth_failure(self):
-        with patch.object(requests.Session, "post") as post:
-            response = Mock(status_code=500)
-            response.raise_for_status.side_effect = requests.exceptions.HTTPError(
-                response=response
-            )
-            post.return_value = response
-
-            with self.assertRaises(EnergyLocalsAPIError) as raised:
-                self.api.login()
-            self.assertNotIsInstance(raised.exception, EnergyLocalsAuthError)
-
-    def test_usage_rejects_inaccessible_account(self):
-        with patch.object(requests.Session, "post") as post:
-            self.api._token = "token"
-            post.return_value = Mock(status_code=403)
-
-            with self.assertRaises(EnergyLocalsAccountError):
-                self.api.get_data(self.day)
-
-    def test_usage_rate_limit_reports_retry_after(self):
-        for header, retry_after in (({"Retry-After": "30"}, 30.0), ({}, None)):
-            with (
-                self.subTest(header=header),
-                patch.object(requests.Session, "post") as post,
-            ):
-                self.api._token = "token"
-                post.return_value = Mock(headers=header, status_code=429)
-
-                with self.assertRaises(EnergyLocalsRateLimitError) as raised:
-                    self.api.get_data(self.day)
-                self.assertEqual(raised.exception.retry_after, retry_after)
-
-    def test_usage_transport_failure_is_not_empty_data(self):
-        with patch.object(requests.Session, "post") as post:
-            self.api._token = "token"
-            post.side_effect = requests.exceptions.ConnectionError("offline")
-
-            with self.assertRaises(EnergyLocalsAPIError):
-                self.api.get_data(self.day)
-
-            self.assertEqual(post.call_count, 1)
-
-    def test_valid_empty_usage_response_remains_empty(self):
-        with patch.object(requests.Session, "post") as post:
-            self.api._token = "token"
-            response = Mock(status_code=200)
-            response.raise_for_status.return_value = None
-            response.json.return_value = {"datasets": []}
-            post.return_value = response
-
-            self.assertEqual(self.api.get_data(self.day), [])
-            post.assert_called_once()
-
-    def test_invalid_usage_shape_is_an_api_failure(self):
-        with patch.object(requests.Session, "post") as post:
-            self.api._token = "token"
-            response = Mock(status_code=200)
-            response.raise_for_status.return_value = None
-            response.json.return_value = {"datasets": [{"data": {}}]}
-            post.return_value = response
-
-            with self.assertRaises(EnergyLocalsAPIError):
-                self.api.get_data(self.day)
-
-    def test_rejected_refreshed_token_is_an_auth_failure(self):
-        with (
-            patch.object(requests.Session, "post") as post,
-            patch.object(self.api, "login", return_value=True) as login,
-        ):
-            self.api._token = "expired"
-            post.side_effect = [Mock(status_code=401), Mock(status_code=401)]
-
-            with self.assertRaises(EnergyLocalsAuthError):
-                self.api.get_data(self.day)
-
-            login.assert_called_once_with()
-
-    def test_expired_token_is_refreshed_once(self):
-        with (
-            patch.object(requests.Session, "post") as post,
-            patch.object(self.api, "login", return_value=True) as login,
-        ):
-            self.api._token = "expired"
-            expired = Mock(status_code=401)
-            refreshed = Mock(status_code=200)
-            refreshed.raise_for_status.return_value = None
-            refreshed.json.return_value = {"datasets": [{"data": [{"y": 1.0}]}]}
-            post.side_effect = [expired, refreshed]
-
-            self.assertEqual(self.api.get_data(self.day), [{"y": 1.0}])
-            login.assert_called_once_with()
+DAY = datetime.date(2026, 8, 8)
+DATA_URL = DATA_URL_TEMPLATE.format("123")
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.fixture
+async def api(hass, aioclient_mock):
+    """Return a client with a token so usage tests skip the login request."""
+    api = EnergyLocalsAPI(
+        async_get_clientsession(hass), "user@example.com", "secret", "123"
+    )
+    api._token = "token"
+    return api
+
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+async def test_login_rejects_invalid_credentials(api, aioclient_mock, status):
+    aioclient_mock.post(LOGIN_URL, status=status)
+    with pytest.raises(EnergyLocalsAuthError):
+        await api.login()
+
+
+async def test_login_server_error_is_not_an_auth_failure(api, aioclient_mock):
+    aioclient_mock.post(LOGIN_URL, status=500)
+    with pytest.raises(EnergyLocalsAPIError) as raised:
+        await api.login()
+    assert not isinstance(raised.value, EnergyLocalsAuthError)
+
+
+async def test_usage_rejects_inaccessible_account(api, aioclient_mock):
+    aioclient_mock.post(DATA_URL, status=403)
+    with pytest.raises(EnergyLocalsAccountError):
+        await api.get_data(DAY)
+
+
+@pytest.mark.parametrize(
+    ("headers", "retry_after"), [({"Retry-After": "30"}, 30.0), ({}, None)]
+)
+async def test_usage_rate_limit_reports_retry_after(
+    api, aioclient_mock, headers, retry_after
+):
+    aioclient_mock.post(DATA_URL, status=429, headers=headers)
+    with pytest.raises(EnergyLocalsRateLimitError) as raised:
+        await api.get_data(DAY)
+    assert raised.value.retry_after == retry_after
+
+
+async def test_usage_transport_failure_is_not_empty_data(api, aioclient_mock):
+    aioclient_mock.post(DATA_URL, exc=ClientConnectionError("offline"))
+    with pytest.raises(EnergyLocalsAPIError):
+        await api.get_data(DAY)
+    assert aioclient_mock.call_count == 1
+
+
+async def test_valid_empty_usage_response_remains_empty(api, aioclient_mock):
+    aioclient_mock.post(DATA_URL, json={"datasets": []})
+    assert await api.get_data(DAY) == []
+    assert aioclient_mock.call_count == 1
+
+
+async def test_invalid_usage_shape_is_an_api_failure(api, aioclient_mock):
+    aioclient_mock.post(DATA_URL, json={"datasets": [{"data": {}}]})
+    with pytest.raises(EnergyLocalsAPIError):
+        await api.get_data(DAY)
+
+
+async def test_rejected_refreshed_token_is_an_auth_failure(api, aioclient_mock):
+    aioclient_mock.post(LOGIN_URL, json={"token": "fresh"})
+    aioclient_mock.post(DATA_URL, status=401)
+    with pytest.raises(EnergyLocalsAuthError):
+        await api.get_data(DAY)
+    assert aioclient_mock.call_count == 3
+
+
+async def test_expired_token_is_refreshed_once(api, aioclient_mock):
+    responses = iter(
+        [
+            AiohttpClientMockResponse("POST", DATA_URL, status=401),
+            AiohttpClientMockResponse(
+                "POST", DATA_URL, json={"datasets": [{"data": [{"y": 1.0}]}]}
+            ),
+        ]
+    )
+
+    async def usage(*_args):
+        return next(responses)
+
+    aioclient_mock.post(LOGIN_URL, json={"token": "fresh"})
+    aioclient_mock.post(DATA_URL, side_effect=usage)
+    assert await api.get_data(DAY) == [{"y": 1.0}]
+    assert api._token == "fresh"
+    assert aioclient_mock.call_count == 3

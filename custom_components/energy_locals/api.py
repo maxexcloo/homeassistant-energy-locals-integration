@@ -2,13 +2,13 @@
 
 import logging
 
-import requests
+import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 
 # Energy Locals may answer a wrong password with a validation error.
 _AUTH_STATUSES = (400, 401, 403)
-_TIMEOUT = 30
+_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 API_BASE = "https://uml-myaccount-api-app-au.azurewebsites.net"
 DATA_URL_TEMPLATE = f"{API_BASE}/utility-accounts/{{}}/usage-chart"
@@ -45,14 +45,13 @@ def _retry_after(resp):
 
 
 class EnergyLocalsAPI:
-    """Synchronous client for the Energy Locals MyAccount API."""
+    """Client for the Energy Locals MyAccount API."""
 
-    def __init__(self, username, password, account_id):
+    def __init__(self, session, username, password, account_id):
+        self._session = session
         self._username = username
         self._password = password
         self._account_id = account_id
-        # Reuse connections across the one-request-per-day history import.
-        self._session = requests.Session()
         self._token = None
 
     def _get_headers(self):
@@ -68,43 +67,37 @@ class EnergyLocalsAPI:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
 
-    def login(self):
+    def _post(self, url, payload):
+        return self._session.post(
+            url, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
+        )
+
+    async def login(self):
         """Authenticate and store the token."""
+        payload = {"password": self._password, "username": self._username}
         try:
-            payload = {"password": self._password, "username": self._username}
-            resp = self._session.post(
-                LOGIN_URL, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
-            )
-            resp.raise_for_status()
-
-            data = resp.json()
-            if not isinstance(data, dict):
-                raise EnergyLocalsAPIError("Energy Locals returned invalid login data")
-            token = data.get("token")
-            if not token:
-                raise EnergyLocalsAuthError("Login response did not contain a token")
-            self._token = token
-        except requests.exceptions.HTTPError as err:
-            if err.response is not None and err.response.status_code in _AUTH_STATUSES:
-                raise EnergyLocalsAuthError(
-                    "Invalid Energy Locals credentials"
-                ) from err
+            async with self._post(LOGIN_URL, payload) as resp:
+                if resp.status in _AUTH_STATUSES:
+                    raise EnergyLocalsAuthError("Invalid Energy Locals credentials")
+                resp.raise_for_status()
+                data = await resp.json(content_type=None)
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             raise EnergyLocalsAPIError("Energy Locals login request failed") from err
-        except requests.exceptions.JSONDecodeError as err:
-            raise EnergyLocalsAPIError(
-                "Energy Locals returned invalid login data"
-            ) from err
-        except requests.exceptions.RequestException as err:
-            raise EnergyLocalsAPIError("Unable to connect to Energy Locals") from err
 
-    def get_data(self, date_obj):
+        if not isinstance(data, dict):
+            raise EnergyLocalsAPIError("Energy Locals returned invalid login data")
+        token = data.get("token")
+        if not token:
+            raise EnergyLocalsAuthError("Login response did not contain a token")
+        self._token = token
+
+    async def get_data(self, date_obj):
         """Fetch usage data for a specific date."""
         if not self._token:
-            self.login()
+            await self.login()
 
         date_str = date_obj.strftime("%Y-%m-%d")
         url = DATA_URL_TEMPLATE.format(self._account_id)
-
         payload = {
             "endDate": date_str,
             "intervalMode": "INTERVAL",
@@ -112,53 +105,51 @@ class EnergyLocalsAPI:
         }
 
         try:
-            resp = self._session.post(
-                url, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
-            )
-
-            if resp.status_code == 401:
-                self._token = None
-                _LOGGER.info("Energy Locals token expired; authenticating again")
-                self.login()
-                resp = self._session.post(
-                    url, json=payload, headers=self._get_headers(), timeout=_TIMEOUT
-                )
-                if resp.status_code == 401:
-                    raise EnergyLocalsAuthError(
-                        "Energy Locals rejected the refreshed credentials"
-                    )
-            if resp.status_code == 403:
-                raise EnergyLocalsAccountError(
-                    "Energy Locals denied access to the utility account"
-                )
-            if resp.status_code == 429:
-                raise EnergyLocalsRateLimitError(
-                    "Energy Locals rate limited usage requests", _retry_after(resp)
-                )
-
-            resp.raise_for_status()
-            data = resp.json()
-
-            if not isinstance(data, dict) or not isinstance(data.get("datasets"), list):
-                raise EnergyLocalsAPIError(
-                    "Energy Locals returned an invalid usage response"
-                )
-            if not data["datasets"]:
-                return []
-
-            dataset = data["datasets"][0]
-            if not isinstance(dataset, dict) or "data" not in dataset:
-                raise EnergyLocalsAPIError(
-                    "Energy Locals returned invalid dataset data"
-                )
-            usage_data = dataset["data"]
-            if not isinstance(usage_data, list):
-                raise EnergyLocalsAPIError(
-                    "Energy Locals returned invalid interval data"
-                )
-            return usage_data
-
-        except requests.exceptions.RequestException as err:
+            data = await self._fetch_usage(url, payload)
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             raise EnergyLocalsAPIError(
                 f"Unable to fetch Energy Locals data for {date_str}"
             ) from err
+
+        if not isinstance(data, dict) or not isinstance(data.get("datasets"), list):
+            raise EnergyLocalsAPIError(
+                "Energy Locals returned an invalid usage response"
+            )
+        if not data["datasets"]:
+            return []
+
+        dataset = data["datasets"][0]
+        if not isinstance(dataset, dict) or "data" not in dataset:
+            raise EnergyLocalsAPIError("Energy Locals returned invalid dataset data")
+        usage_data = dataset["data"]
+        if not isinstance(usage_data, list):
+            raise EnergyLocalsAPIError("Energy Locals returned invalid interval data")
+        return usage_data
+
+    async def _fetch_usage(self, url, payload):
+        """Post a usage request, logging in again once if the token expired."""
+        async with self._post(url, payload) as resp:
+            if resp.status != 401:
+                return await self._usage_json(resp)
+        self._token = None
+        _LOGGER.info("Energy Locals token expired; authenticating again")
+        await self.login()
+        async with self._post(url, payload) as resp:
+            if resp.status == 401:
+                raise EnergyLocalsAuthError(
+                    "Energy Locals rejected the refreshed credentials"
+                )
+            return await self._usage_json(resp)
+
+    @staticmethod
+    async def _usage_json(resp):
+        if resp.status == 403:
+            raise EnergyLocalsAccountError(
+                "Energy Locals denied access to the utility account"
+            )
+        if resp.status == 429:
+            raise EnergyLocalsRateLimitError(
+                "Energy Locals rate limited usage requests", _retry_after(resp)
+            )
+        resp.raise_for_status()
+        return await resp.json(content_type=None)

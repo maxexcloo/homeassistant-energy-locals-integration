@@ -5,6 +5,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
@@ -53,13 +54,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Energy Locals from a config entry."""
-    username = entry.data[CONF_USERNAME]
-    password = entry.data[CONF_PASSWORD]
-    account_id = entry.data[CONF_ACCOUNT]
-
-    api = EnergyLocalsAPI(username, password, account_id)
+    api = EnergyLocalsAPI(
+        async_get_clientsession(hass),
+        entry.data[CONF_USERNAME],
+        entry.data[CONF_PASSWORD],
+        entry.data[CONF_ACCOUNT],
+    )
     try:
-        await hass.async_add_executor_job(api.login)
+        await api.login()
     except EnergyLocalsAuthError as err:
         raise ConfigEntryAuthFailed("Invalid Energy Locals credentials") from err
     except EnergyLocalsAPIError as err:

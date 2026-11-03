@@ -1,7 +1,7 @@
 """Configuration, reauthentication, reconfiguration and tariff options flows."""
 
 import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -132,7 +132,7 @@ async def test_infinite_prices_show_a_form_error(hass, step):
 async def test_account_validation(hass, step, failure, error):
     """Each entry path validates access and retains settings on failure."""
     yesterday = _today() - datetime.timedelta(days=1)
-    api = Mock()
+    api = AsyncMock()
     if failure:
         method = api.login if failure is EnergyLocalsAuthError else api.get_data
         method.side_effect = failure("Validation failed")
@@ -167,7 +167,7 @@ async def test_account_validation(hass, step, failure, error):
             expected = ("replacement@example.com", "replacement-password", "123")
         await hass.async_block_till_done()
 
-    factory.assert_called_once_with(*expected)
+    factory.assert_called_once_with(ANY, *expected)
     api.login.assert_called_once_with()
     if failure is EnergyLocalsAuthError:
         api.get_data.assert_not_called()

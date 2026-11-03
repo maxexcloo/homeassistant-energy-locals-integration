@@ -172,7 +172,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         """Fetch one day's intervals, retrying transient API failures."""
         for attempt in range(_RETRY_ATTEMPTS):
             try:
-                return await self.hass.async_add_executor_job(self.api.get_data, day)
+                return await self.api.get_data(day)
             except EnergyLocalsAuthError as err:
                 raise ConfigEntryAuthFailed(
                     "Energy Locals credentials are no longer valid"

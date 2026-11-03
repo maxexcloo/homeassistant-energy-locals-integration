@@ -1,7 +1,7 @@
 """Tests for Energy Locals setup, unload and migration."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -122,7 +122,7 @@ class TestEnergyLocalsMigration:
 async def test_setup_login_failures(hass, failure, state, reauth):
     """Rejected credentials start reauthentication; outages retry setup."""
     entry = _entry(hass)
-    with patch("custom_components.energy_locals.EnergyLocalsAPI") as api:
+    with patch("custom_components.energy_locals.EnergyLocalsAPI", autospec=True) as api:
         api.return_value.login.side_effect = failure("login failed")
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -141,7 +141,7 @@ async def test_setup_and_unload(hass):
         return {"total_kwh": 1.0}
 
     with (
-        patch("custom_components.energy_locals.EnergyLocalsAPI") as api,
+        patch("custom_components.energy_locals.EnergyLocalsAPI", autospec=True) as api,
         patch(
             "custom_components.energy_locals.EnergyLocalsCoordinator._perform_sync",
             new=perform_sync,
@@ -149,7 +149,7 @@ async def test_setup_and_unload(hass):
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        api.assert_called_once_with("user@example.com", "secret", "123")
+        api.assert_called_once_with(ANY, "user@example.com", "secret", "123")
         assert entry.state is ConfigEntryState.LOADED
         assert hass.states.get("sensor.energy_locals_123_usage").state == "unknown"
 
@@ -171,7 +171,7 @@ async def test_background_import_auth_failure_starts_reauth(hass):
     """Credentials rejected during the history import still start reauthentication."""
     entry = _entry(hass)
     with (
-        patch("custom_components.energy_locals.EnergyLocalsAPI"),
+        patch("custom_components.energy_locals.EnergyLocalsAPI", autospec=True),
         patch(
             "custom_components.energy_locals.EnergyLocalsCoordinator._perform_sync",
             new=AsyncMock(side_effect=ConfigEntryAuthFailed("rejected")),

@@ -40,7 +40,7 @@ async def test_entities_use_documented_ids_and_report_sync_data(hass):
             "homeassistant.components.recorder.async_setup",
             new=AsyncMock(return_value=True),
         ),
-        patch("custom_components.energy_locals.EnergyLocalsAPI"),
+        patch("custom_components.energy_locals.EnergyLocalsAPI", autospec=True),
         patch(
             "custom_components.energy_locals.EnergyLocalsCoordinator._perform_sync",
             new=AsyncMock(

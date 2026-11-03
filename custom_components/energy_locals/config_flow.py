@@ -6,6 +6,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import DateSelector
 
 from .api import (
@@ -34,11 +35,10 @@ from .tariffs import TARIFF_EFFECTIVE_FROM, tariff_for_date, upsert_tariff
 
 async def _async_validate_account(hass, username, password, account_id):
     """Validate credentials and account access with consistent form errors."""
-    api = EnergyLocalsAPI(username, password, account_id)
+    api = EnergyLocalsAPI(async_get_clientsession(hass), username, password, account_id)
     try:
-        await hass.async_add_executor_job(api.login)
-        yesterday = _today() - datetime.timedelta(days=1)
-        await hass.async_add_executor_job(api.get_data, yesterday)
+        await api.login()
+        await api.get_data(_today() - datetime.timedelta(days=1))
     except EnergyLocalsAuthError:
         return {"base": "invalid_auth"}
     except EnergyLocalsAccountError:
