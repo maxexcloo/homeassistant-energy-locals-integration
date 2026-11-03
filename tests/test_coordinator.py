@@ -317,8 +317,8 @@ class TestRecorderRebuilds:
             starts = sorted(
                 {
                     datetime.datetime.fromisoformat(point["dateValue"])
+                    .replace(minute=0, tzinfo=TZ_SYDNEY)
                     .astimezone(datetime.UTC)
-                    .replace(minute=0)
                     for day in days
                     for point in _usage_data(day)
                 }
