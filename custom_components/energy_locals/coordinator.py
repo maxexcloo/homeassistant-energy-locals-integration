@@ -28,6 +28,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import (
+    EnergyLocalsAccountError,
     EnergyLocalsAPI,
     EnergyLocalsAPIError,
     EnergyLocalsAuthError,
@@ -174,6 +175,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             except EnergyLocalsAuthError as err:
                 raise ConfigEntryAuthFailed(
                     "Energy Locals credentials are no longer valid"
+                ) from err
+            except EnergyLocalsAccountError as err:
+                raise UpdateFailed(
+                    "Energy Locals denied access to the utility account"
                 ) from err
             except EnergyLocalsAPIError as err:
                 if attempt == _RETRY_ATTEMPTS - 1:
