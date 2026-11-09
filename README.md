@@ -2,14 +2,9 @@
 
 Imports interval usage data from [Energy Locals Urban](https://urban.energylocals.com.au/) into Home Assistant's long-term statistics, so the Energy Dashboard can show historical electricity use and cost.
 
-## Features
-
-- Detects inconsistent statistics and rebuilds them safely
-- Tariffs with effective dates, so a price change only affects usage from that date
-- Imports half-hourly interval data as hourly long-term statistics
-- A rebuild button that keeps existing history if the replacement data is incomplete
-- Supports multiple accounts
-- Tracks cumulative kWh usage and cost, with a configurable daily supply charge
+Supports multiple accounts and imports half-hourly readings as hourly statistics.
+Inconsistent statistics are rebuilt automatically, keeping existing history if
+the replacement data is incomplete.
 
 ## Installation
 
@@ -100,8 +95,8 @@ then run the checks from the repository root:
 mise run check
 ```
 
-GitHub Actions also runs HACS and hassfest validation. Testing against the real
-service needs a Home Assistant installation connected to Energy Locals.
+Testing against the real service needs a Home Assistant installation connected
+to Energy Locals.
 
 ## Licence
 
