@@ -48,7 +48,8 @@ from .tariffs import tariff_for_date
 _LOGGER = logging.getLogger(__name__)
 
 # Energy Locals reports readings it has not published yet as zero, so recent days
-# are fetched again on every sync. Older gaps can be skipped on initial imports.
+# are fetched again on every sync. Older incomplete days are skipped unless
+# rebuilding.
 _DATA_GRACE_DAYS = 3
 _INTERVAL = timedelta(minutes=30)
 # Retry each day's request with doubling delays, honouring a bounded Retry-After.
