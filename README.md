@@ -1,6 +1,9 @@
 # Energy Locals Home Assistant Integration
 
-Imports interval usage data from [Energy Locals Urban](https://urban.energylocals.com.au/) into Home Assistant's long-term statistics, so the Energy Dashboard can show historical electricity use and cost.
+Imports interval usage data from
+[Energy Locals Urban](https://urban.energylocals.com.au/) into Home Assistant's
+long-term statistics, so the Energy Dashboard can show historical electricity
+use and cost.
 
 Supports multiple accounts and imports half-hourly readings as hourly statistics.
 Inconsistent statistics are rebuilt automatically, keeping existing history if
@@ -20,11 +23,13 @@ Requires Home Assistant 2026.10.4 or newer.
 
 ### Manual
 
-Copy the `custom_components/energy_locals/` folder into your Home Assistant `config/custom_components/` directory and restart.
+Copy the `custom_components/energy_locals/` folder into your Home Assistant
+`config/custom_components/` directory and restart.
 
 ## Configuration
 
-Go to **Settings → Devices & Services → Add Integration** and search for **Energy Locals**.
+Go to **Settings → Devices & Services → Add Integration** and search for
+**Energy Locals**.
 
 | Field               | Description                                      |
 | ------------------- | ------------------------------------------------ |
@@ -38,7 +43,9 @@ Go to **Settings → Devices & Services → Add Integration** and search for **E
 History imports in the background after setup, so a long first import doesn't
 hold up Home Assistant. The sensors show values once it finishes.
 
-To find your Utility Account ID, log in at [urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools → Network and look for a request to `/utility-accounts/{id}/usage-chart`.
+To find your Utility Account ID, log in at
+[urban.energylocals.com.au](https://urban.energylocals.com.au/), open DevTools →
+Network and look for a request to `/utility-accounts/{id}/usage-chart`.
 
 ## Updating Prices
 
@@ -66,7 +73,8 @@ To change the utility account, remove the entry and add it again.
 
 ## Energy Dashboard Setup
 
-The integration imports statistics directly instead of through sensor state changes, so you need to add them to the Energy Dashboard by hand:
+The integration imports statistics directly instead of through sensor state
+changes, so you need to add them to the Energy Dashboard by hand:
 
 1. Go to **Settings → Dashboards → Energy**
 2. Under **Electricity Grid → Grid Consumption**, click **Add Consumption**
