@@ -6,7 +6,7 @@ long-term statistics for the Energy Dashboard.
 
 ## Installation
 
-Requires Home Assistant 2026.10.4 or newer.
+Requires Home Assistant 2026.11.1 or newer.
 
 ### HACS (Recommended)
 
