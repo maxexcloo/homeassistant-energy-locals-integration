@@ -19,8 +19,8 @@ class EnergyLocalsEntity(CoordinatorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_device_info = DeviceInfo(
             entry_type=DeviceEntryType.SERVICE,
+            identifiers={(DOMAIN, entry.entry_id)},
             manufacturer=NAME,
             model="Utility Meter",
             name=entry_title(entry.data[CONF_ACCOUNT]),
-            identifiers={(DOMAIN, entry.entry_id)},
         )
