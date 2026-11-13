@@ -5,6 +5,7 @@ from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -15,12 +16,10 @@ from custom_components.energy_locals.api import (
 )
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
-    CONF_PASSWORD,
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_START_DATE,
     CONF_TARIFFS,
-    CONF_USERNAME,
     DOMAIN,
 )
 from custom_components.energy_locals.tariffs import upsert_tariff

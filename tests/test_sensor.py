@@ -3,6 +3,7 @@
 import datetime
 from unittest.mock import AsyncMock, patch
 
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -10,10 +11,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
-    CONF_PASSWORD,
     CONF_START_DATE,
     CONF_TARIFFS,
-    CONF_USERNAME,
     DOMAIN,
 )
 from custom_components.energy_locals.tariffs import upsert_tariff

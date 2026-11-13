@@ -3,6 +3,7 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -10,12 +11,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
 from .const import (
     CONF_ACCOUNT,
-    CONF_PASSWORD,
     CONF_PRICE_SUPPLY_DOLLARS,
     CONF_PRICE_USAGE_DOLLARS,
     CONF_START_DATE,
     CONF_TARIFFS,
-    CONF_USERNAME,
     DEFAULT_PRICE_SUPPLY_DOLLARS,
     DEFAULT_PRICE_USAGE_DOLLARS,
     DOMAIN,

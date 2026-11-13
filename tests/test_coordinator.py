@@ -9,6 +9,7 @@ from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     statistics_during_period,
 )
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -20,10 +21,8 @@ from custom_components.energy_locals.api import (
 )
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
-    CONF_PASSWORD,
     CONF_START_DATE,
     CONF_TARIFFS,
-    CONF_USERNAME,
     DOMAIN,
     TZ_SYDNEY,
 )
