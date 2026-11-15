@@ -133,8 +133,7 @@ async def test_account_validation(hass, step, failure, error):
     yesterday = _today() - datetime.timedelta(days=1)
     api = AsyncMock()
     if failure:
-        method = api.login if failure is EnergyLocalsAuthError else api.get_data
-        method.side_effect = failure("Validation failed")
+        api.get_data.side_effect = failure("Validation failed")
     entry = None if step == "user" else _entry(hass, yesterday)
     before = None if entry is None else dict(entry.data)
     with patch(
@@ -167,11 +166,7 @@ async def test_account_validation(hass, step, failure, error):
         await hass.async_block_till_done()
 
     factory.assert_called_once_with(ANY, *expected)
-    api.login.assert_called_once_with()
-    if failure is EnergyLocalsAuthError:
-        api.get_data.assert_not_called()
-    else:
-        api.get_data.assert_called_once_with(yesterday)
+    api.get_data.assert_called_once_with(yesterday)
     if error:
         assert result["type"] == "form"
         assert result["errors"] == {"base": error}

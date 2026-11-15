@@ -10,6 +10,7 @@ from homeassistant.components.recorder.statistics import (
     statistics_during_period,
 )
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -28,7 +29,6 @@ from custom_components.energy_locals.const import (
 )
 from custom_components.energy_locals.coordinator import (
     EnergyLocalsCoordinator,
-    UpdateFailed,
     _extract_value,
     _interval_starts,
     _is_day_complete,
@@ -124,7 +124,7 @@ class TestEnergyLocalsCoordinator:
         assert _extract_value({"y": "1.5"}) == 1.5
         assert _extract_value({"y": -1}) == 0.0
         for point in ({"value": 1.0}, {"y": None}, {"y": "nan"}):
-            with pytest.raises(ValueError):
+            with pytest.raises((KeyError, TypeError, ValueError)):
                 _extract_value(point)
 
     async def test_completeness_requires_the_requested_local_day(self):

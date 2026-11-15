@@ -36,7 +36,6 @@ async def _async_validate_account(hass, username, password, account_id):
     """Validate credentials and account access with consistent form errors."""
     api = EnergyLocalsAPI(async_get_clientsession(hass), username, password, account_id)
     try:
-        await api.login()
         await api.get_data(_today() - datetime.timedelta(days=1))
     except EnergyLocalsAuthError:
         return {"base": "invalid_auth"}

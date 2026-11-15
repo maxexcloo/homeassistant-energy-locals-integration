@@ -15,14 +15,11 @@ from .const import (
     CONF_PRICE_USAGE_DOLLARS,
     CONF_START_DATE,
     CONF_TARIFFS,
-    DEFAULT_PRICE_SUPPLY_DOLLARS,
-    DEFAULT_PRICE_USAGE_DOLLARS,
     DOMAIN,
+    PLATFORMS,
 )
 from .coordinator import EnergyLocalsCoordinator
 from .tariffs import upsert_tariff
-
-PLATFORMS = ["button", "sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,8 +30,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     if entry.version < 3:
         data = dict(entry.data)
-        usage_price = data.pop(CONF_PRICE_USAGE_DOLLARS, DEFAULT_PRICE_USAGE_DOLLARS)
-        supply_price = data.pop(CONF_PRICE_SUPPLY_DOLLARS, DEFAULT_PRICE_SUPPLY_DOLLARS)
+        usage_price = data.pop(CONF_PRICE_USAGE_DOLLARS)
+        supply_price = data.pop(CONF_PRICE_SUPPLY_DOLLARS)
         # Version two already stored a validated schedule in the entry data.
         tariffs = data.pop(CONF_TARIFFS, None) or upsert_tariff(
             [], data[CONF_START_DATE], usage_price, supply_price
