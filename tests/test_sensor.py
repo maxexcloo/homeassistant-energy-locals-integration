@@ -19,7 +19,7 @@ from custom_components.energy_locals.tariffs import upsert_tariff
 
 
 async def test_entities_use_documented_ids_and_report_sync_data(hass):
-    """Entity IDs follow the README and missing totals stay unknown."""
+    """Entity IDs stay stable and missing totals stay unknown."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={

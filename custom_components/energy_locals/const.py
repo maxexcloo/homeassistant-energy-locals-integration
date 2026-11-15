@@ -2,8 +2,11 @@
 
 from zoneinfo import ZoneInfo
 
+from homeassistant.const import Platform
+
 DOMAIN = "energy_locals"
 NAME = "Energy Locals"
+PLATFORMS = [Platform.BUTTON, Platform.SENSOR]
 
 CONF_ACCOUNT = "account_id"
 CONF_PRICE_SUPPLY_DOLLARS = "supply_price_dollars"

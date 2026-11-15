@@ -1,13 +1,10 @@
 """Coordinator for the Energy Locals integration."""
 
-from __future__ import annotations
-
 import asyncio
 import datetime
 import logging
 import math
 from collections import defaultdict
-from datetime import timedelta
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import (
@@ -52,7 +49,7 @@ _LOGGER = logging.getLogger(__name__)
 # are fetched again on every sync. Older incomplete days are skipped unless
 # rebuilding.
 _DATA_GRACE_DAYS = 3
-_INTERVAL = timedelta(minutes=30)
+_INTERVAL = datetime.timedelta(minutes=30)
 # Retry each day's request with doubling delays, honouring a bounded Retry-After.
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY = 2
@@ -74,10 +71,7 @@ def _interval_starts(usage_data: list) -> list[tuple[dict, datetime.datetime]]:
 
 def _extract_value(point):
     """Return an interval's usage, rejecting non-numeric values."""
-    try:
-        value = float(point["y"])
-    except KeyError, ValueError, TypeError:
-        value = math.nan
+    value = float(point["y"])
     if not math.isfinite(value):
         raise ValueError("Usage interval did not contain a finite numeric value")
     return max(0.0, value)
@@ -130,7 +124,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=timedelta(hours=6),
+            update_interval=datetime.timedelta(hours=6),
         )
         self.api = api
         self._force_rebuild = False
@@ -222,7 +216,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
     async def _perform_sync(self, *, force_rebuild=False):
         conf = self.config_entry.data
-        start_date_raw = datetime.date.fromisoformat(conf[CONF_START_DATE])
+        start_date = datetime.date.fromisoformat(conf[CONF_START_DATE])
         tariffs = self.config_entry.options[CONF_TARIFFS]
 
         account_id = conf[CONF_ACCOUNT]
@@ -265,15 +259,15 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             clear_before_import = True
 
         if is_rebuilding:
-            curr = start_date_raw
+            curr = start_date
             g_kwh = 0.0
             g_cost = 0.0
         elif last_day_syd:
             curr = max(
-                start_date_raw,
+                start_date,
                 min(
-                    last_day_syd + timedelta(days=1),
-                    today_syd - timedelta(days=_DATA_GRACE_DAYS),
+                    last_day_syd + datetime.timedelta(days=1),
+                    today_syd - datetime.timedelta(days=_DATA_GRACE_DAYS),
                 ),
             )
             if curr <= last_day_syd:
@@ -282,7 +276,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 g_kwh -= await self._async_change_since(id_e, since)
                 g_cost -= await self._async_change_since(id_c, since)
         else:
-            curr = start_date_raw
+            curr = start_date
 
         if curr >= today_syd:
             if is_rebuilding:
@@ -315,20 +309,20 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                         f"Rebuild stopped: incomplete usage data for {curr}"
                     )
                 _LOGGER.debug("Skipping incomplete historical day %s", curr)
-                curr += timedelta(days=1)
+                curr += datetime.timedelta(days=1)
                 continue
 
             buckets = defaultdict(float)
             day_tariff = tariff_for_date(tariffs, curr)
 
             for p, start in intervals:
-                # Read a repeated wall time as standard time, as earlier imports did.
+                # Read a repeated wall time as standard time.
                 t_utc = start.replace(minute=0, tzinfo=TZ_SYDNEY, fold=1).astimezone(
                     datetime.UTC
                 )
                 try:
                     buckets[t_utc] += _extract_value(p)
-                except ValueError as err:
+                except (KeyError, TypeError, ValueError) as err:
                     raise UpdateFailed(
                         f"Invalid Energy Locals usage interval for {curr}"
                     ) from err
@@ -345,7 +339,7 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                     StatisticData(start=t, state=round(g_cost, 3), sum=round(g_cost, 3))
                 )
 
-            curr += timedelta(days=1)
+            curr += datetime.timedelta(days=1)
 
         if not st_e_all and last_ts_e is None:
             raise UpdateFailed("No valid history found")
@@ -359,8 +353,6 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 datetime.datetime.combine(today_syd, datetime.time(), TZ_SYDNEY),
             )
 
-        # Clear statistics only after staging complete replacement history and
-        # confirming every existing non-future recorder hour remains covered.
         # The recorder runs queued tasks in order, so the clear finishes before the
         # imports below without waiting for it.
         if clear_before_import:
