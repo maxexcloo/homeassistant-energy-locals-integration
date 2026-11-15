@@ -166,6 +166,9 @@ class EnergyLocalsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 tariff_for_date(entry.options[CONF_TARIFFS], start_date)
             except ValueError:
                 errors["base"] = "start_date_before_tariff"
+            # A rebuild cannot remove rows before a later date, so it would abort.
+            if start_date > datetime.date.fromisoformat(entry.data[CONF_START_DATE]):
+                errors["base"] = "start_date_later"
             if start_date > _today():
                 errors["base"] = "start_date_future"
 
