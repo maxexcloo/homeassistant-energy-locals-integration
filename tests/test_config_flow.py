@@ -195,7 +195,11 @@ async def test_account_validation(hass, step, failure, error):
 @pytest.mark.usefixtures("mock_setup")
 @pytest.mark.parametrize(
     ("start_offset", "error"),
-    [(-1, "start_date_before_tariff"), (2, "start_date_future")],
+    [
+        (-1, "start_date_before_tariff"),
+        (1, "start_date_later"),
+        (2, "start_date_future"),
+    ],
 )
 async def test_reconfigure_rejects_invalid_settings(hass, start_offset, error):
     """Reconfiguration keeps the entry unchanged when the settings are invalid."""
@@ -259,11 +263,17 @@ async def test_options_store_tariffs(hass, prices, effective_offset, schedule):
 @pytest.mark.usefixtures("mock_setup")
 async def test_changed_start_date_starts_a_rebuild(hass):
     """A date change must rebuild rather than continue from the last import."""
-    start = _today() - datetime.timedelta(days=3)
-    entry = _entry(hass, start)
+    changed = (_today() - datetime.timedelta(days=4)).isoformat()
+    entry = _entry(hass, datetime.date.fromisoformat(changed))
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_START_DATE: (_today() - datetime.timedelta(days=3)).isoformat(),
+        },
+    )
     entry.mock_state(hass, ConfigEntryState.LOADED)
     entry.runtime_data = Mock(async_force_sync=AsyncMock())
-    changed = (start + datetime.timedelta(days=1)).isoformat()
     result = await entry.start_reconfigure_flow(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_START_DATE: changed}
