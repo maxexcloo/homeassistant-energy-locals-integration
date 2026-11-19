@@ -12,7 +12,7 @@
       "invalid_price": "Prices must be finite numbers of zero or more.",
       "start_date_before_tariff": "The import start date must be on or after the first configured tariff.",
       "start_date_future": "The import start date cannot be in the future.",
-      "start_date_later": "The import start date cannot be later than the current one. To start later, remove the entry and add it again."
+      "start_date_later": "The import start date cannot be later than the current one."
     },
     "step": {
       "reauth_confirm": {

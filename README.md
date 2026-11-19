@@ -30,7 +30,7 @@ Network and look for a request to `/utility-accounts/{id}/usage-chart`.
 
 ## Changing Prices & Accounts
 
-Add tariffs under **Configure** and change the import start date under
+Add tariffs under **Configure** and move the import start date earlier under
 **Reconfigure**. After adding or correcting a tariff that is already in effect,
 press **Rebuild Statistics** to recalculate historical cost. To change the
 utility account, remove the entry and add it again.
