@@ -20,6 +20,7 @@ from custom_components.energy_locals.api import (
     EnergyLocalsAPIError,
     EnergyLocalsRateLimitError,
 )
+from custom_components.energy_locals.button import EnergyLocalsRebuildButton
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_START_DATE,
@@ -488,21 +489,36 @@ class TestRecorderRebuilds:
             assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(4.0)
             assert result["total_kwh"] == pytest.approx(4.0)
 
-    async def test_automatic_repair_clears_only_corrupt_future_rows(self):
+    @pytest.mark.parametrize("manual", [False, True])
+    @pytest.mark.parametrize("complete", [False, True])
+    async def test_rebuild_with_corrupt_future_rows(self, manual, complete):
         tomorrow = self.day + datetime.timedelta(days=2)
         days = [self.first_day, tomorrow]
-        await self._seed_statistics(days, days)
-        self.api.get_data.side_effect = [_usage_data(self.first_day), []]
+        await self._seed_statistics(days if manual else days[:1], days)
+        before = await self._read_statistics()
+        self.api.get_data.side_effect = [
+            _usage_data(self.first_day),
+            _usage_data(self.day) if complete else [],
+        ]
 
-        await self.coordinator._perform_sync()
+        if manual:
+            await EnergyLocalsRebuildButton(
+                self.coordinator, "force_rebuild"
+            ).async_press()
+        else:
+            await self.coordinator.async_refresh()
 
         after = await self._read_statistics()
+        assert self.coordinator.last_update_success == complete
+        if not complete:
+            assert after == before
+            return
         for statistic_id in self.statistic_ids:
-            assert len(after[statistic_id]) == 24
+            assert len(after[statistic_id]) == 48
             assert (
                 datetime.datetime.fromtimestamp(
                     after[statistic_id][-1]["start"], TZ_SYDNEY
                 ).date()
-                == self.first_day
+                == self.day
             )
-        assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(1.0)
+        assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(2.0)

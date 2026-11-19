@@ -232,6 +232,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         g_cost = db_cost if db_cost is not None else 0.0
 
         today_syd = datetime.datetime.now(TZ_SYDNEY).date()
+        today_start = datetime.datetime.combine(today_syd, datetime.time(), TZ_SYDNEY)
+        today_ts = today_start.timestamp()
         current_tariff = tariff_for_date(tariffs, today_syd)
         price_kwh = current_tariff[CONF_PRICE_USAGE_DOLLARS]
         last_day_syd = (
@@ -241,25 +243,16 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             if last_ts_e
             else None
         )
-        is_rebuilding = force_rebuild
-        clear_before_import = False
+        series_out_of_sync = last_ts_e != last_ts_c
+        clear_before_import = any(
+            ts is not None and ts >= today_ts for ts in (last_ts_e, last_ts_c)
+        )
+        is_rebuilding = force_rebuild or series_out_of_sync or clear_before_import
 
-        # Paired usage and cost series must end on the same hour.
-        if last_ts_e != last_ts_c and not is_rebuilding:
+        if series_out_of_sync:
             _LOGGER.warning(
-                "Energy Locals usage and cost statistics are out of sync; "
-                "staging an automatic rebuild"
+                "Energy Locals usage and cost statistics are out of sync; staging a rebuild"
             )
-            is_rebuilding = True
-            clear_before_import = True
-
-        if not is_rebuilding and last_day_syd and last_day_syd >= today_syd:
-            _LOGGER.warning(
-                "Invalid future data detected (%s); forcing automatic rebuild",
-                last_day_syd,
-            )
-            is_rebuilding = True
-            clear_before_import = True
 
         if is_rebuilding:
             curr = start_date
@@ -296,21 +289,17 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         while curr < today_syd:
             intervals = _interval_starts(await self._async_fetch_day(curr))
             if not _is_day_complete([start for _point, start in intervals], curr):
-                # Stop before a missing or incomplete day can corrupt subsequent
-                # sums; recent data may not be published yet, so retry next sync.
+                if is_rebuilding:
+                    raise UpdateFailed(
+                        f"Rebuild stopped: replacement history is incomplete for {curr}"
+                    )
                 if (today_syd - curr).days <= _DATA_GRACE_DAYS:
                     _LOGGER.debug("Day %s is not complete yet, stopping sync", curr)
                     # Rewriting only the earlier refetched days would leave later
                     # rows with stale sums, so keep everything until the next sync.
-                    if not is_rebuilding and last_day_syd and curr <= last_day_syd:
+                    if last_day_syd and curr <= last_day_syd:
                         return _result(price_kwh, db_cost, db_kwh)
                     break
-                # A rebuild must not overwrite later cumulative rows when an older
-                # contribution is no longer available.
-                if is_rebuilding:
-                    raise UpdateFailed(
-                        f"Rebuild stopped: incomplete usage data for {curr}"
-                    )
                 _LOGGER.debug("Skipping incomplete historical day %s", curr)
                 curr += datetime.timedelta(days=1)
                 continue
@@ -348,18 +337,14 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("No valid history found")
 
         if is_rebuilding:
-            if not st_e_all:
-                raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
-            await self._async_validate_replacement(
-                (id_e, id_c),
-                st_e_all,
-                datetime.datetime.combine(today_syd, datetime.time(), TZ_SYDNEY),
-            )
+            await self._async_validate_replacement((id_e, id_c), st_e_all, today_start)
 
         # The recorder runs queued tasks in order, so the clear finishes before the
         # imports below without waiting for it.
         if clear_before_import:
-            _LOGGER.warning("Clearing Energy Locals statistics: %s", [id_e, id_c])
+            _LOGGER.warning(
+                "Clearing Energy Locals statistics with future rows: %s", [id_e, id_c]
+            )
             get_instance(self.hass).async_clear_statistics([id_e, id_c])
 
         if st_e_all:
