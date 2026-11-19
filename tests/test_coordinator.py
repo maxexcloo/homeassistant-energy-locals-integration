@@ -20,6 +20,7 @@ from custom_components.energy_locals.api import (
     EnergyLocalsAPIError,
     EnergyLocalsRateLimitError,
 )
+from custom_components.energy_locals.button import EnergyLocalsRebuildButton
 from custom_components.energy_locals.const import (
     CONF_ACCOUNT,
     CONF_START_DATE,
@@ -242,9 +243,10 @@ class TestEnergyLocalsCoordinator:
             await self.coordinator._async_update_data()
         assert not self.coordinator._force_rebuild
 
-    async def test_failed_requests_back_off_and_honour_retry_after(self):
+    @pytest.mark.parametrize("retry_after", [0.0, 30.0])
+    async def test_failed_requests_back_off_and_honour_retry_after(self, retry_after):
         self.api.get_data.side_effect = [
-            EnergyLocalsRateLimitError("slow down", retry_after=30.0),
+            EnergyLocalsRateLimitError("slow down", retry_after=retry_after),
             EnergyLocalsAPIError("offline"),
             _usage_data(self.day),
         ]
@@ -253,7 +255,7 @@ class TestEnergyLocalsCoordinator:
             "custom_components.energy_locals.coordinator.asyncio.sleep"
         ) as sleep:
             result = await self.coordinator._perform_sync()
-        assert [call.args[0] for call in sleep.await_args_list] == [30.0, 4]
+        assert [call.args[0] for call in sleep.await_args_list] == [retry_after, 4]
         assert result["total_kwh"] == pytest.approx(1.0)
 
     async def test_zero_usage_history_remains_valid(self):
@@ -487,21 +489,36 @@ class TestRecorderRebuilds:
             assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(4.0)
             assert result["total_kwh"] == pytest.approx(4.0)
 
-    async def test_automatic_repair_clears_only_corrupt_future_rows(self):
+    @pytest.mark.parametrize("manual", [False, True])
+    @pytest.mark.parametrize("complete", [False, True])
+    async def test_rebuild_with_corrupt_future_rows(self, manual, complete):
         tomorrow = self.day + datetime.timedelta(days=2)
         days = [self.first_day, tomorrow]
-        await self._seed_statistics(days, days)
-        self.api.get_data.side_effect = [_usage_data(self.first_day), []]
+        await self._seed_statistics(days if manual else days[:1], days)
+        before = await self._read_statistics()
+        self.api.get_data.side_effect = [
+            _usage_data(self.first_day),
+            _usage_data(self.day) if complete else [],
+        ]
 
-        await self.coordinator._perform_sync()
+        if manual:
+            await EnergyLocalsRebuildButton(
+                self.coordinator, "force_rebuild"
+            ).async_press()
+        else:
+            await self.coordinator.async_refresh()
 
         after = await self._read_statistics()
+        assert self.coordinator.last_update_success == complete
+        if not complete:
+            assert after == before
+            return
         for statistic_id in self.statistic_ids:
-            assert len(after[statistic_id]) == 24
+            assert len(after[statistic_id]) == 48
             assert (
                 datetime.datetime.fromtimestamp(
                     after[statistic_id][-1]["start"], TZ_SYDNEY
                 ).date()
-                == self.first_day
+                == self.day
             )
-        assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(1.0)
+        assert after[self.statistic_ids[0]][-1]["sum"] == pytest.approx(2.0)
