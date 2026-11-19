@@ -180,7 +180,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                         f"Unable to fetch Energy Locals data for {day}"
                     ) from err
                 delay = _RETRY_DELAY * 2**attempt
-                if isinstance(err, EnergyLocalsRateLimitError) and err.retry_after:
+                if (
+                    isinstance(err, EnergyLocalsRateLimitError)
+                    and err.retry_after is not None
+                ):
                     delay = err.retry_after
                 await asyncio.sleep(min(delay, _RETRY_MAX_DELAY))
 

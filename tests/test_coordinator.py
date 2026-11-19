@@ -242,9 +242,10 @@ class TestEnergyLocalsCoordinator:
             await self.coordinator._async_update_data()
         assert not self.coordinator._force_rebuild
 
-    async def test_failed_requests_back_off_and_honour_retry_after(self):
+    @pytest.mark.parametrize("retry_after", [0.0, 30.0])
+    async def test_failed_requests_back_off_and_honour_retry_after(self, retry_after):
         self.api.get_data.side_effect = [
-            EnergyLocalsRateLimitError("slow down", retry_after=30.0),
+            EnergyLocalsRateLimitError("slow down", retry_after=retry_after),
             EnergyLocalsAPIError("offline"),
             _usage_data(self.day),
         ]
@@ -253,7 +254,7 @@ class TestEnergyLocalsCoordinator:
             "custom_components.energy_locals.coordinator.asyncio.sleep"
         ) as sleep:
             result = await self.coordinator._perform_sync()
-        assert [call.args[0] for call in sleep.await_args_list] == [30.0, 4]
+        assert [call.args[0] for call in sleep.await_args_list] == [retry_after, 4]
         assert result["total_kwh"] == pytest.approx(1.0)
 
     async def test_zero_usage_history_remains_valid(self):
