@@ -1,7 +1,9 @@
 """Button platform for the Energy Locals integration."""
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.exceptions import HomeAssistantError
 
+from .const import DOMAIN
 from .entity import EnergyLocalsEntity
 
 
@@ -14,3 +16,7 @@ class EnergyLocalsRebuildButton(EnergyLocalsEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.coordinator.async_force_sync()
+        if not self.coordinator.last_update_success:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="rebuild_failed"
+            )

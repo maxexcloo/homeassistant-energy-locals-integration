@@ -65,6 +65,11 @@
       }
     }
   },
+  "exceptions": {
+    "rebuild_failed": {
+      "message": "Energy Locals could not rebuild statistics. Check the Home Assistant logs for details."
+    }
+  },
   "options": {
     "error": {
       "invalid_price": "Prices must be finite numbers of zero or more."

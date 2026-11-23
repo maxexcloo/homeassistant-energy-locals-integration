@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+from contextlib import nullcontext
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -10,6 +11,7 @@ from homeassistant.components.recorder.statistics import (
     statistics_during_period,
 )
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import (
@@ -502,9 +504,17 @@ class TestRecorderRebuilds:
         ]
 
         if manual:
-            await EnergyLocalsRebuildButton(
-                self.coordinator, "force_rebuild"
-            ).async_press()
+            button = EnergyLocalsRebuildButton(self.coordinator, "force_rebuild")
+            expected = (
+                nullcontext()
+                if complete
+                else pytest.raises(
+                    HomeAssistantError,
+                    check=lambda err: err.translation_key == "rebuild_failed",
+                )
+            )
+            with expected:
+                await button.async_press()
         else:
             await self.coordinator.async_refresh()
 
