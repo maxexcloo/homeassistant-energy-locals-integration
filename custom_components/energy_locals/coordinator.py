@@ -21,6 +21,7 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -54,6 +55,13 @@ _INTERVAL = datetime.timedelta(minutes=30)
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY = 2
 _RETRY_MAX_DELAY = 60
+
+
+type EnergyLocalsConfigEntry = ConfigEntry[EnergyLocalsCoordinator]
+
+
+class _IncompleteRebuild(UpdateFailed):
+    """A rebuild stopped before replacing statistics."""
 
 
 def _interval_starts(usage_data: list) -> list[tuple[dict, datetime.datetime]]:
@@ -97,7 +105,7 @@ def _result(price_kwh, total_cost, total_kwh):
     }
 
 
-def _statistic_ids(account_id):
+def statistic_ids(account_id):
     statistic_base = f"{DOMAIN}:account_{account_id}"
     return f"{statistic_base}_usage", f"{statistic_base}_cost"
 
@@ -117,8 +125,10 @@ def _statistic_metadata(
     )
 
 
-class EnergyLocalsCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass: HomeAssistant, api: EnergyLocalsAPI, entry: ConfigEntry):
+class EnergyLocalsCoordinator(DataUpdateCoordinator[dict]):
+    def __init__(
+        self, hass: HomeAssistant, api: EnergyLocalsAPI, entry: EnergyLocalsConfigEntry
+    ):
         super().__init__(
             hass,
             _LOGGER,
@@ -139,7 +149,8 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         finally:
             self._rebuild_tasks.remove(task)
 
-    async def _get_db_total(self, statistic_id):
+    async def async_get_statistic_total(self, statistic_id):
+        """Read the latest sum and start timestamp for a recorder series."""
         try:
             recorder = get_instance(self.hass)
             stats = await recorder.async_add_executor_job(
@@ -148,7 +159,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             if rows := stats.get(statistic_id):
                 return rows[0].get("sum"), rows[0].get("start")
         except Exception as err:
-            raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="statistic_read_failed",
+                translation_placeholders={"statistic_id": statistic_id},
+            ) from err
         return None, None
 
     async def _async_change_since(self, statistic_id, start):
@@ -163,7 +178,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 None,
             )
         except Exception as err:
-            raise UpdateFailed(f"Unable to read statistic {statistic_id}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="statistic_read_failed",
+                translation_placeholders={"statistic_id": statistic_id},
+            ) from err
         return stats["change"] or 0.0
 
     async def _async_fetch_day(self, day):
@@ -173,16 +192,18 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 return await self.api.get_data(day)
             except EnergyLocalsAuthError as err:
                 raise ConfigEntryAuthFailed(
-                    "Energy Locals credentials are no longer valid"
+                    translation_domain=DOMAIN, translation_key="invalid_auth"
                 ) from err
             except EnergyLocalsAccountError as err:
                 raise UpdateFailed(
-                    "Energy Locals denied access to the utility account"
+                    translation_domain=DOMAIN, translation_key="account_access_denied"
                 ) from err
             except EnergyLocalsAPIError as err:
                 if attempt == _RETRY_ATTEMPTS - 1:
                     raise UpdateFailed(
-                        f"Unable to fetch Energy Locals data for {day}"
+                        translation_domain=DOMAIN,
+                        translation_key="fetch_failed",
+                        translation_placeholders={"date": day.isoformat()},
                     ) from err
                 delay = _RETRY_DELAY * 2**attempt
                 if (
@@ -206,19 +227,39 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 {"sum"},
             )
         except Exception as err:
-            raise UpdateFailed("Unable to validate replacement history") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="replacement_validation_failed",
+            ) from err
         replacement_starts = {row["start"].timestamp() for row in statistics}
         if any(
             row["start"] not in replacement_starts
             for rows in existing.values()
             for row in rows
         ):
-            raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
+            raise _IncompleteRebuild(
+                translation_domain=DOMAIN, translation_key="replacement_incomplete"
+            )
 
     async def _async_update_data(self):
-        return await self._perform_sync(
-            force_rebuild=asyncio.current_task() in self._rebuild_tasks
-        )
+        entry = self.config_entry
+        try:
+            result = await self._perform_sync(
+                force_rebuild=asyncio.current_task() in self._rebuild_tasks
+            )
+        except _IncompleteRebuild:
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                entry.entry_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="rebuild_incomplete",
+                translation_placeholders={"entry_title": entry.title},
+            )
+            raise
+        ir.async_delete_issue(self.hass, DOMAIN, entry.entry_id)
+        return result
 
     async def _perform_sync(self, *, force_rebuild=False):
         conf = self.config_entry.data
@@ -226,10 +267,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
         tariffs = self.config_entry.options[CONF_TARIFFS]
 
         account_id = conf[CONF_ACCOUNT]
-        id_e, id_c = _statistic_ids(account_id)
+        id_e, id_c = statistic_ids(account_id)
 
-        db_kwh, last_ts_e = await self._get_db_total(id_e)
-        db_cost, last_ts_c = await self._get_db_total(id_c)
+        db_kwh, last_ts_e = await self.async_get_statistic_total(id_e)
+        db_cost, last_ts_c = await self.async_get_statistic_total(id_c)
 
         g_kwh = db_kwh if db_kwh is not None else 0.0
         g_cost = db_cost if db_cost is not None else 0.0
@@ -279,9 +320,13 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
 
         if curr >= today_syd:
             if is_rebuilding:
-                raise UpdateFailed("No replacement history is available to import")
+                raise _IncompleteRebuild(
+                    translation_domain=DOMAIN, translation_key="replacement_unavailable"
+                )
             if last_ts_e is None:
-                raise UpdateFailed("No valid history found")
+                raise UpdateFailed(
+                    translation_domain=DOMAIN, translation_key="no_valid_history"
+                )
             return _result(price_kwh, g_cost, g_kwh)
 
         _LOGGER.info("Syncing Energy Locals statistics from %s", curr)
@@ -293,8 +338,10 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             intervals = _interval_starts(await self._async_fetch_day(curr))
             if not _is_day_complete([start for _point, start in intervals], curr):
                 if is_rebuilding:
-                    raise UpdateFailed(
-                        f"Rebuild stopped: replacement history is incomplete for {curr}"
+                    raise _IncompleteRebuild(
+                        translation_domain=DOMAIN,
+                        translation_key="replacement_incomplete_day",
+                        translation_placeholders={"date": curr.isoformat()},
                     )
                 if (today_syd - curr).days <= _DATA_GRACE_DAYS:
                     _LOGGER.debug("Day %s is not complete yet, stopping sync", curr)
@@ -318,8 +365,11 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
                 try:
                     buckets[t_utc] += _extract_value(p)
                 except (KeyError, TypeError, ValueError) as err:
-                    raise UpdateFailed(
-                        f"Invalid Energy Locals usage interval for {curr}"
+                    failure = _IncompleteRebuild if is_rebuilding else UpdateFailed
+                    raise failure(
+                        translation_domain=DOMAIN,
+                        translation_key="invalid_interval",
+                        translation_placeholders={"date": curr.isoformat()},
                     ) from err
 
             # The daily supply charge is added to the day's first hour.
@@ -337,7 +387,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             curr += datetime.timedelta(days=1)
 
         if not st_e_all and last_ts_e is None:
-            raise UpdateFailed("No valid history found")
+            raise UpdateFailed(
+                translation_domain=DOMAIN, translation_key="no_valid_history"
+            )
 
         if is_rebuilding:
             await self._async_validate_replacement((id_e, id_c), st_e_all, today_start)

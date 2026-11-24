@@ -21,6 +21,10 @@
         "data": {
           "username": "Username",
           "password": "Password"
+        },
+        "data_description": {
+          "password": "The password you use to sign in to Energy Locals Urban MyAccount.",
+          "username": "The username you use to sign in to Energy Locals Urban MyAccount."
         }
       },
       "reconfigure": {
@@ -28,6 +32,9 @@
         "title": "Reconfigure Energy Locals",
         "data": {
           "start_date": "Import Start Date (YYYY-MM-DD)"
+        },
+        "data_description": {
+          "start_date": "Choose the earliest day to import. This date can only be moved earlier."
         }
       },
       "user": {
@@ -40,6 +47,14 @@
           "start_date": "Import Start Date (YYYY-MM-DD)",
           "usage_price_dollars": "Price Per kWh ($)",
           "supply_price_dollars": "Daily Supply Charge ($)"
+        },
+        "data_description": {
+          "account_id": "In Energy Locals Urban MyAccount, open your browser’s developer tools and select Network. Open your usage chart and copy the ID between /utility-accounts/ and /usage-chart in the request URL.",
+          "password": "The password you use to sign in to Energy Locals Urban MyAccount.",
+          "username": "The username you use to sign in to Energy Locals Urban MyAccount.",
+          "start_date": "Choose the earliest day of meter readings to import.",
+          "supply_price_dollars": "Enter the daily supply charge in Australian dollars as shown on your bill.",
+          "usage_price_dollars": "Enter the usage rate in Australian dollars per kilowatt-hour as shown on your bill."
         }
       }
     }
@@ -66,8 +81,47 @@
     }
   },
   "exceptions": {
+    "account_access_denied": {
+      "message": "Energy Locals denied access to the utility account."
+    },
+    "cannot_connect": {
+      "message": "Unable to connect to Energy Locals."
+    },
+    "fetch_failed": {
+      "message": "Unable to fetch Energy Locals data for {date}."
+    },
+    "invalid_auth": {
+      "message": "Energy Locals credentials are invalid."
+    },
+    "invalid_interval": {
+      "message": "Energy Locals returned an invalid usage interval for {date}."
+    },
+    "no_valid_history": {
+      "message": "No valid Energy Locals history was available to import."
+    },
     "rebuild_failed": {
       "message": "Energy Locals could not rebuild statistics. Check the Home Assistant logs for details."
+    },
+    "replacement_incomplete": {
+      "message": "Rebuild stopped because the replacement history is incomplete."
+    },
+    "replacement_incomplete_day": {
+      "message": "Rebuild stopped because the replacement history is incomplete for {date}."
+    },
+    "replacement_unavailable": {
+      "message": "No replacement history is available to import."
+    },
+    "replacement_validation_failed": {
+      "message": "Unable to validate the replacement statistics."
+    },
+    "statistic_read_failed": {
+      "message": "Unable to read statistic {statistic_id}."
+    }
+  },
+  "issues": {
+    "rebuild_incomplete": {
+      "description": "Home Assistant kept the existing usage and cost statistics because Energy Locals did not provide a complete replacement history. Check your usage history in Energy Locals Urban MyAccount and use Rebuild Statistics when the missing readings are available.",
+      "title": "Statistics rebuild stopped for {entry_title}"
     }
   },
   "options": {
@@ -82,6 +136,11 @@
           "usage_price_dollars": "Tariff Price Per kWh ($)",
           "supply_price_dollars": "Tariff Daily Supply Charge ($)",
           "tariff_effective_date": "Tariff Effective From (YYYY-MM-DD)"
+        },
+        "data_description": {
+          "supply_price_dollars": "Enter the daily supply charge in Australian dollars as shown on your bill.",
+          "usage_price_dollars": "Enter the usage rate in Australian dollars per kilowatt-hour as shown on your bill.",
+          "tariff_effective_date": "The first day these rates apply, as listed on your bill."
         }
       }
     }

@@ -1,6 +1,7 @@
 {
   "domain": "energy_locals",
   "name": "Energy Locals",
+  "categories": ["energy.meters_monitoring"],
   "codeowners": ["@maxexcloo"],
   "config_flow": true,
   "dependencies": ["recorder"],
