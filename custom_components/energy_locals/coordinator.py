@@ -127,12 +127,17 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             update_interval=datetime.timedelta(hours=6),
         )
         self.api = api
-        self._force_rebuild = False
+        self._rebuild_tasks = set()
 
     async def async_force_sync(self):
         _LOGGER.info("Manual statistics rebuild requested")
-        self._force_rebuild = True
-        await self.async_refresh()
+        # Home Assistant serialises refreshes in their calling tasks.
+        task = asyncio.current_task()
+        self._rebuild_tasks.add(task)
+        try:
+            await self.async_refresh()
+        finally:
+            self._rebuild_tasks.remove(task)
 
     async def _get_db_total(self, statistic_id):
         try:
@@ -211,11 +216,9 @@ class EnergyLocalsCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("Rebuild stopped: replacement history is incomplete")
 
     async def _async_update_data(self):
-        # Home Assistant serialises refreshes. Consume only this refresh's request
-        # so a button press during an API await remains queued for the next one.
-        force_rebuild = self._force_rebuild
-        self._force_rebuild = False
-        return await self._perform_sync(force_rebuild=force_rebuild)
+        return await self._perform_sync(
+            force_rebuild=asyncio.current_task() in self._rebuild_tasks
+        )
 
     async def _perform_sync(self, *, force_rebuild=False):
         conf = self.config_entry.data

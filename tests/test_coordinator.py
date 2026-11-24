@@ -204,27 +204,6 @@ class TestEnergyLocalsCoordinator:
         assert self.add_external_statistics.call_count == 2
         get_instance.return_value.async_clear_statistics.assert_not_called()
 
-    async def test_button_rebuild_waits_for_an_ongoing_refresh(self):
-        started = asyncio.Event()
-        release = asyncio.Event()
-        rebuilds = []
-
-        async def perform_sync(*, force_rebuild):
-            rebuilds.append(force_rebuild)
-            if len(rebuilds) == 1:
-                started.set()
-                await release.wait()
-            return {"total_kwh": 1.0}
-
-        self.coordinator._perform_sync = perform_sync
-        refresh = asyncio.create_task(self.coordinator.async_refresh())
-        await started.wait()
-        rebuild = asyncio.create_task(self.coordinator.async_force_sync())
-        await asyncio.sleep(0)
-        release.set()
-        await asyncio.gather(refresh, rebuild)
-        assert rebuilds == [False, True]
-
     async def test_modern_metadata_omits_deprecated_has_mean(self):
         metadata = _statistic_metadata(
             name="Usage",
@@ -235,15 +214,6 @@ class TestEnergyLocalsCoordinator:
         assert metadata["mean_type"] == 0
         assert metadata["unit_class"] == "energy"
         assert "has_mean" not in metadata
-
-    async def test_rebuild_request_is_consumed_after_failure(self):
-        self.coordinator._force_rebuild = True
-        self.coordinator._perform_sync = AsyncMock(
-            side_effect=UpdateFailed("source unavailable")
-        )
-        with pytest.raises(UpdateFailed):
-            await self.coordinator._async_update_data()
-        assert not self.coordinator._force_rebuild
 
     @pytest.mark.parametrize("retry_after", [0.0, 30.0])
     async def test_failed_requests_back_off_and_honour_retry_after(self, retry_after):
@@ -415,6 +385,38 @@ class TestRecorderRebuilds:
             await self.coordinator._perform_sync(force_rebuild=rebuild == "button")
 
         assert await self._read_statistics() == before
+
+    async def test_queued_refresh_does_not_hide_a_failed_button_rebuild(self):
+        days = [self.first_day, self.day]
+        await self._seed_statistics(days, days)
+        before = await self._read_statistics()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def get_data(day):
+            started.set()
+            await release.wait()
+            return [] if day == self.day else _usage_data(day)
+
+        self.api.get_data.side_effect = get_data
+        active = asyncio.create_task(self.coordinator.async_refresh())
+        await started.wait()
+        queued = asyncio.create_task(self.coordinator.async_refresh())
+        button = EnergyLocalsRebuildButton(self.coordinator, "force_rebuild")
+        rebuild = asyncio.create_task(button.async_press())
+        release.set()
+        await asyncio.gather(active, queued)
+
+        with pytest.raises(
+            HomeAssistantError,
+            check=lambda err: err.translation_key == "rebuild_failed",
+        ):
+            await rebuild
+
+        assert await self._read_statistics() == before
+
+        await self.coordinator.async_refresh()
+        assert self.coordinator.last_update_success
 
     @pytest.mark.parametrize("missing", ["day", "interval"])
     async def test_rebuild_preserves_history_when_an_older_day_has_gaps(self, missing):
