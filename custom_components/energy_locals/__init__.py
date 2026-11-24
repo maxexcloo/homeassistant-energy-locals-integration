@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import EnergyLocalsAPI, EnergyLocalsAPIError, EnergyLocalsAuthError
@@ -18,7 +19,7 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import EnergyLocalsCoordinator
+from .coordinator import EnergyLocalsConfigEntry, EnergyLocalsCoordinator
 from .tariffs import upsert_tariff
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +49,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: EnergyLocalsConfigEntry
+) -> bool:
     """Set up Energy Locals from a config entry."""
     api = EnergyLocalsAPI(
         async_get_clientsession(hass),
@@ -59,9 +62,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await api.login()
     except EnergyLocalsAuthError as err:
-        raise ConfigEntryAuthFailed("Invalid Energy Locals credentials") from err
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="invalid_auth"
+        ) from err
     except EnergyLocalsAPIError as err:
-        raise ConfigEntryNotReady("Unable to connect to Energy Locals") from err
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN, translation_key="cannot_connect"
+        ) from err
 
     coordinator = EnergyLocalsCoordinator(hass, api, entry)
     entry.runtime_data = coordinator
@@ -75,6 +82,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(
+    hass: HomeAssistant, entry: EnergyLocalsConfigEntry
+) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(
+    hass: HomeAssistant, entry: EnergyLocalsConfigEntry
+) -> None:
+    """Remove the repair notice when its config entry is deleted."""
+    ir.async_delete_issue(hass, DOMAIN, entry.entry_id)

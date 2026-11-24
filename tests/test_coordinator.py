@@ -12,7 +12,9 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
@@ -35,8 +37,8 @@ from custom_components.energy_locals.coordinator import (
     _extract_value,
     _interval_starts,
     _is_day_complete,
-    _statistic_ids,
     _statistic_metadata,
+    statistic_ids,
 )
 from custom_components.energy_locals.tariffs import upsert_tariff
 
@@ -92,7 +94,9 @@ async def test_daylight_saving_days_import(hass, freezer, day, hours, repeated_h
     api = AsyncMock()
     api.get_data.return_value = _usage_data(day, total=48.0)
     coordinator = EnergyLocalsCoordinator(hass, api, entry)
-    coordinator._get_db_total = AsyncMock(side_effect=[(None, None), (None, None)])
+    coordinator.async_get_statistic_total = AsyncMock(
+        side_effect=[(None, None), (None, None)]
+    )
     with patch(
         "custom_components.energy_locals.coordinator.async_add_external_statistics"
     ) as add_statistics:
@@ -156,8 +160,12 @@ class TestEnergyLocalsCoordinator:
             point["dateValue"] = f"{self.day + datetime.timedelta(days=1)}T00:00:00"
         data.append(point)
         self.api.get_data.return_value = data
-        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
-        with pytest.raises(UpdateFailed, match="No valid history"):
+        self.coordinator.async_get_statistic_total = AsyncMock(
+            return_value=(None, None)
+        )
+        with pytest.raises(
+            UpdateFailed, check=lambda err: err.translation_key == "no_valid_history"
+        ):
             await self.coordinator._perform_sync()
         self.add_external_statistics.assert_not_called()
 
@@ -169,8 +177,12 @@ class TestEnergyLocalsCoordinator:
                 CONF_START_DATE: (self.day + datetime.timedelta(days=1)).isoformat(),
             },
         )
-        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
-        with pytest.raises(UpdateFailed, match="No valid history"):
+        self.coordinator.async_get_statistic_total = AsyncMock(
+            return_value=(None, None)
+        )
+        with pytest.raises(
+            UpdateFailed, check=lambda err: err.translation_key == "no_valid_history"
+        ):
             await self.coordinator._perform_sync()
         self.api.get_data.assert_not_called()
         self.add_external_statistics.assert_not_called()
@@ -181,7 +193,7 @@ class TestEnergyLocalsCoordinator:
             {"dateValue": f"{self.day}T00:00:00", "y": 1.0},
             {"dateValue": f"{next_day}T23:30:00", "y": 1.0},
         ]
-        self.coordinator._get_db_total = AsyncMock(
+        self.coordinator.async_get_statistic_total = AsyncMock(
             side_effect=[(None, None), (None, None)]
         )
         with pytest.raises(UpdateFailed):
@@ -192,7 +204,7 @@ class TestEnergyLocalsCoordinator:
         last_start = datetime.datetime.combine(
             self.day, datetime.time(23), tzinfo=TZ_SYDNEY
         ).timestamp()
-        self.coordinator._get_db_total = AsyncMock(
+        self.coordinator.async_get_statistic_total = AsyncMock(
             side_effect=[(12.0, last_start), (4.0, last_start)]
         )
         self.api.get_data.return_value = _usage_data(self.day, total=2.0)
@@ -222,7 +234,9 @@ class TestEnergyLocalsCoordinator:
             EnergyLocalsAPIError("offline"),
             _usage_data(self.day),
         ]
-        self.coordinator._get_db_total = AsyncMock(return_value=(None, None))
+        self.coordinator.async_get_statistic_total = AsyncMock(
+            return_value=(None, None)
+        )
         with patch(
             "custom_components.energy_locals.coordinator.asyncio.sleep"
         ) as sleep:
@@ -232,7 +246,7 @@ class TestEnergyLocalsCoordinator:
 
     async def test_zero_usage_history_remains_valid(self):
         self.api.get_data.return_value = _usage_data(self.day, total=0.0)
-        self.coordinator._get_db_total = AsyncMock(
+        self.coordinator.async_get_statistic_total = AsyncMock(
             side_effect=[(None, None), (None, None)]
         )
         result = await self.coordinator._perform_sync()
@@ -264,7 +278,7 @@ class TestRecorderRebuilds:
         self.entry.add_to_hass(hass)
         self.api = AsyncMock()
         self.coordinator = EnergyLocalsCoordinator(hass, self.api, self.entry)
-        self.statistic_ids = _statistic_ids("123")
+        self.statistic_ids = statistic_ids("123")
 
     async def _seed_statistics(self, usage_days, cost_days):
         for statistic_id, days, unit, unit_class in (
@@ -307,6 +321,38 @@ class TestRecorderRebuilds:
             None,
             {"state", "sum"},
         )
+
+    async def test_diagnostics_report_redacted_configuration_and_recorder_status(
+        self, hass_client
+    ):
+        await self._seed_statistics([self.first_day], [self.day])
+        self.api.get_data.return_value = []
+        assert await async_setup_component(self.hass, "diagnostics", {})
+        with patch(
+            "custom_components.energy_locals.EnergyLocalsAPI", return_value=self.api
+        ):
+            assert await self.hass.config_entries.async_setup(self.entry.entry_id)
+            await self.hass.async_block_till_done(wait_background_tasks=True)
+
+        client = await hass_client()
+        response = await client.get(
+            f"/api/diagnostics/config_entry/{self.entry.entry_id}"
+        )
+        assert response.status == 200
+        diagnostics = (await response.json())["data"]
+
+        assert diagnostics["config"] == {
+            CONF_ACCOUNT: "**REDACTED**",
+            CONF_PASSWORD: "**REDACTED**",
+            CONF_START_DATE: self.first_day.isoformat(),
+            CONF_USERNAME: "**REDACTED**",
+        }
+        assert diagnostics["tariffs"] == self.entry.options[CONF_TARIFFS]
+        assert diagnostics["last_sync"] == {"result": "failed", "timestamp": None}
+        assert diagnostics["last_statistic"] == {
+            "cost": "2026-10-17T12:00:00+00:00",
+            "usage": "2026-10-16T12:00:00+00:00",
+        }
 
     async def test_later_syncs_heal_recent_days_without_duplicates(self, freezer):
         """Recent days are fetched again, so late readings replace early zeros."""
@@ -381,7 +427,10 @@ class TestRecorderRebuilds:
             del replacement[20]
         self.api.get_data.side_effect = [_usage_data(self.first_day), replacement]
 
-        with pytest.raises(UpdateFailed, match="replacement history is incomplete"):
+        with pytest.raises(
+            UpdateFailed,
+            check=lambda err: err.translation_key == "replacement_incomplete_day",
+        ):
             await self.coordinator._perform_sync(force_rebuild=rebuild == "button")
 
         assert await self._read_statistics() == before
@@ -441,7 +490,10 @@ class TestRecorderRebuilds:
             replacement.pop(20)
         self.api.get_data.return_value = replacement
 
-        with pytest.raises(UpdateFailed, match="Rebuild stopped"):
+        with pytest.raises(
+            UpdateFailed,
+            check=lambda err: err.translation_key == "replacement_incomplete_day",
+        ):
             await self.coordinator._perform_sync(force_rebuild=True)
 
         assert await self._read_statistics() == before
@@ -483,7 +535,10 @@ class TestRecorderRebuilds:
         )
         self.api.get_data.side_effect = lambda day: _usage_data(day, total=2.0)
         if later:
-            with pytest.raises(UpdateFailed, match="replacement history is incomplete"):
+            with pytest.raises(
+                UpdateFailed,
+                check=lambda err: err.translation_key == "replacement_incomplete",
+            ):
                 await self.coordinator._perform_sync(force_rebuild=True)
             assert await self._read_statistics() == before
         else:
@@ -522,9 +577,18 @@ class TestRecorderRebuilds:
 
         after = await self._read_statistics()
         assert self.coordinator.last_update_success == complete
+        registry = ir.async_get(self.hass)
         if not complete:
             assert after == before
+            issue = registry.async_get_issue(DOMAIN, self.entry.entry_id)
+            assert issue.translation_key == "rebuild_incomplete"
+            if not manual:
+                self.api.get_data.side_effect = _usage_data
+                await self.coordinator.async_refresh()
+                assert self.coordinator.last_update_success
+                assert registry.async_get_issue(DOMAIN, self.entry.entry_id) is None
             return
+        assert registry.async_get_issue(DOMAIN, self.entry.entry_id) is None
         for statistic_id in self.statistic_ids:
             assert len(after[statistic_id]) == 48
             assert (

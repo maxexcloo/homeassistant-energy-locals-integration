@@ -10,8 +10,12 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
+from homeassistant.helpers.entity import EntityCategory
 
+from .coordinator import EnergyLocalsConfigEntry
 from .entity import EnergyLocalsEntity
+
+PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -33,6 +37,7 @@ SENSORS = (
         key="last_synced",
         translation_key="last_synced",
         device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: data["last_synced"],
     ),
     EnergyLocalsSensorEntityDescription(
@@ -52,7 +57,7 @@ SENSORS = (
 )
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
+async def async_setup_entry(hass, entry: EnergyLocalsConfigEntry, async_add_entities):
     async_add_entities(
         EnergyLocalsSensor(entry.runtime_data, description) for description in SENSORS
     )
